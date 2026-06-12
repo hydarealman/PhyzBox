@@ -39,6 +39,11 @@ private:
     [[nodiscard]] double automaticTimeScale() const;
     [[nodiscard]] bool speedSliderHitTest(int x, int y) const;
     void setSimulationSpeedFromSlider(int x);
+    [[nodiscard]] int bodyHitTest(int x, int y) const;
+    void beginBodyDrag(int x, int y);
+    void updateBodyDrag(int x, int y, bool verticalOnly);
+    void cameraFrame(Vec3& eye, Vec3& right, Vec3& up, Vec3& forward) const;
+    void exportSnapshot() const;
 
     HWND hwnd_ = nullptr;
     HDC deviceContext_ = nullptr;
@@ -56,8 +61,13 @@ private:
     bool showGrid_ = true;
     bool autoOrbit_ = true;
     bool autoTimeScale_ = true;
+    bool showParticles_ = true;
+    bool showShadow_ = true;
+    bool showField_ = false;
+    bool editMode_ = false;
     bool mouseDragging_ = false;
     bool speedSliderDragging_ = false;
+    bool bodyDragging_ = false;
     POINT lastMouse_{};
 
     double cameraYaw_ = 0.85;
@@ -69,6 +79,7 @@ private:
     double simulationAccumulator_ = 0.0;
     double fps_ = 0.0;
     int focusIndex_ = -1;
+    int selectedBody_ = -1;
 
     std::chrono::steady_clock::time_point lastFrameTime_{};
 };

@@ -158,6 +158,11 @@ void applyBodyField(InitialConditionConfig& config, int index, const std::string
             body.radius = std::max(0.002, *parsed);
             config.enabled = true;
         }
+    } else if (normalizedField == "physical.radius" || normalizedField == "physicalradius" || normalizedField == "collision.radius") {
+        if (const auto parsed = parseDouble(value)) {
+            body.physicalRadius = std::max(1.0e-5, *parsed);
+            config.enabled = true;
+        }
     } else if (normalizedField == "color" || normalizedField == "colour") {
         if (const auto parsed = parseColor(value)) {
             body.color = *parsed;
@@ -270,4 +275,3 @@ InitialConditionConfig loadInitialConditionConfigFromDefaultLocations() {
 }
 
 } // namespace phyz
-

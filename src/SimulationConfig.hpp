@@ -12,6 +12,7 @@ struct BodyInitialConfig {
     std::optional<std::string> name;
     std::optional<double> mass;
     std::optional<double> radius;
+    std::optional<double> physicalRadius;
     std::optional<Color> color;
     std::optional<Vec3> position;
     std::optional<Vec3> velocity;
@@ -31,4 +32,3 @@ InitialConditionConfig loadInitialConditionConfig(const std::string& path);
 InitialConditionConfig loadInitialConditionConfigFromDefaultLocations();
 
 } // namespace phyz
-

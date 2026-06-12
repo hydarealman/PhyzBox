@@ -77,15 +77,24 @@ void Renderer::render(const NBodySystem& system, const RenderState& state) {
     glDepthMask(GL_FALSE);
     if (state.showGrid) {
         renderReferenceGrid();
+        if (state.showField) {
+            renderGravityField(system);
+        }
         renderDepthCues(system);
     }
     if (state.showTrails) {
         renderTrails(system);
     }
+    if (state.showParticles) {
+        renderTestParticles(system);
+    }
+    if (state.showShadow) {
+        renderShadowSystem(system);
+    }
     glDepthMask(GL_TRUE);
 
     renderGlows(system);
-    renderBodies(system, state.focusIndex);
+    renderBodies(system, state.focusIndex, state.selectedBody);
     renderHud(system, state);
 }
 
@@ -261,6 +270,35 @@ void Renderer::renderReferenceGrid() {
     glEnd();
 }
 
+void Renderer::renderGravityField(const NBodySystem& system) {
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glLineWidth(1.0f);
+
+    glBegin(GL_LINES);
+    for (int x = -5; x <= 5; ++x) {
+        for (int y = -5; y <= 5; ++y) {
+            const Vec3 origin{static_cast<double>(x) * 0.75, static_cast<double>(y) * 0.75, 0.0};
+            const Vec3 acceleration = system.accelerationAt(origin);
+            const double magnitude = length(acceleration);
+            if (magnitude <= 1.0e-8) {
+                continue;
+            }
+            const double arrowLength = clamp(std::log1p(magnitude) * 0.06, 0.035, 0.22);
+            const Vec3 end = origin + normalized(acceleration) * arrowLength;
+            const float alpha = static_cast<float>(clamp(std::log1p(magnitude) * 0.045, 0.05, 0.26));
+            glColor4f(0.42f, 0.78f, 1.00f, alpha);
+            glVertex3d(origin.x, origin.y, origin.z);
+            glColor4f(0.92f, 0.98f, 1.00f, alpha + 0.08f);
+            glVertex3d(end.x, end.y, end.z);
+        }
+    }
+    glEnd();
+
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
 void Renderer::renderDepthCues(const NBodySystem& system) {
     glDisable(GL_LIGHTING);
     glEnable(GL_BLEND);
@@ -320,6 +358,70 @@ void Renderer::renderTrails(const NBodySystem& system) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
+void Renderer::renderTestParticles(const NBodySystem& system) {
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glLineWidth(1.0f);
+
+    for (const TestParticle& particle : system.testParticles()) {
+        if (particle.trail.size() >= 2) {
+            glBegin(GL_LINE_STRIP);
+            int index = 0;
+            const double count = static_cast<double>(particle.trail.size() - 1);
+            for (const Vec3& point : particle.trail) {
+                const float age = static_cast<float>(index / count);
+                glColor4f(0.42f, 0.72f, 1.00f, 0.015f + age * 0.075f);
+                glVertex3d(point.x, point.y, point.z);
+                ++index;
+            }
+            glEnd();
+        }
+    }
+
+    glPointSize(2.0f);
+    glBegin(GL_POINTS);
+    for (const TestParticle& particle : system.testParticles()) {
+        glColor4f(particle.color.r, particle.color.g, particle.color.b, particle.color.a);
+        glVertex3d(particle.position.x, particle.position.y, particle.position.z);
+    }
+    glEnd();
+    glPointSize(1.0f);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+void Renderer::renderShadowSystem(const NBodySystem& system) {
+    const auto& shadow = system.shadowBodies();
+    const auto& bodies = system.bodies();
+    if (shadow.empty() || shadow.size() != bodies.size()) {
+        return;
+    }
+
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glLineWidth(1.0f);
+
+    glBegin(GL_LINES);
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        glColor4f(0.95f, 0.58f, 1.00f, 0.10f);
+        glVertex3d(bodies[i].position.x, bodies[i].position.y, bodies[i].position.z);
+        glColor4f(0.95f, 0.58f, 1.00f, 0.36f);
+        glVertex3d(shadow[i].position.x, shadow[i].position.y, shadow[i].position.z);
+    }
+    glEnd();
+
+    glPointSize(6.0f);
+    glBegin(GL_POINTS);
+    for (const Body& body : shadow) {
+        glColor4f(0.95f, 0.58f, 1.00f, 0.52f);
+        glVertex3d(body.position.x, body.position.y, body.position.z);
+    }
+    glEnd();
+    glPointSize(1.0f);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
 void Renderer::renderGlows(const NBodySystem& system) {
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
@@ -345,7 +447,7 @@ void Renderer::renderGlows(const NBodySystem& system) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
-void Renderer::renderBodies(const NBodySystem& system, int focusIndex) {
+void Renderer::renderBodies(const NBodySystem& system, int focusIndex, int selectedIndex) {
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_TRUE);
     glEnable(GL_LIGHTING);
@@ -387,6 +489,9 @@ void Renderer::renderBodies(const NBodySystem& system, int focusIndex) {
 
     if (focusIndex >= 0 && focusIndex < static_cast<int>(bodies.size())) {
         renderFocusMarker(bodies[static_cast<std::size_t>(focusIndex)]);
+    }
+    if (selectedIndex >= 0 && selectedIndex < static_cast<int>(bodies.size()) && selectedIndex != focusIndex) {
+        renderFocusMarker(bodies[static_cast<std::size_t>(selectedIndex)]);
     }
 }
 
@@ -460,8 +565,8 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     glColor4f(0.02f, 0.03f, 0.06f, 0.56f);
     glVertex2f(18.0f, 18.0f);
     glVertex2f(552.0f, 18.0f);
-    glVertex2f(552.0f, 232.0f);
-    glVertex2f(18.0f, 232.0f);
+    glVertex2f(552.0f, 342.0f);
+    glVertex2f(18.0f, 342.0f);
     glEnd();
 
     std::ostringstream line;
@@ -502,12 +607,20 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
 
     line.str("");
     line.clear();
+    line << "status " << system.systemStatus()
+         << " | chaos " << std::scientific << std::setprecision(2) << system.chaosDivergence() << " AU"
+         << " | mergers " << std::defaultfloat << system.mergerCount()
+         << (state.collisionsEnabled ? " | merge on" : " | merge off");
+    drawText(34.0f, 162.0f, line.str(), {0.82f, 0.92f, 1.00f, 0.92f});
+
+    line.str("");
+    line.clear();
     line << std::fixed << std::setprecision(3)
          << "Base speed " << state.baseSimulationSpeed << "x";
-    drawText(34.0f, 162.0f, line.str(), {0.86f, 0.91f, 1.00f, 0.92f});
+    drawText(34.0f, 186.0f, line.str(), {0.86f, 0.91f, 1.00f, 0.92f});
 
     const float sliderX = 34.0f;
-    const float sliderY = 178.0f;
+    const float sliderY = 202.0f;
     const float sliderWidth = 484.0f;
     const float sliderHeight = 8.0f;
     const float knobWidth = 12.0f;
@@ -534,7 +647,24 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     glVertex2f(knobX - knobWidth * 0.5f, sliderY + sliderHeight + 5.0f);
     glEnd();
 
-    drawText(34.0f, 214.0f, "Mouse drag/wheel | Space R 0 1 2 3 4 +/- A T G O F Esc", {0.78f, 0.80f, 0.86f, 0.86f});
+    drawText(34.0f, 238.0f, "Mouse drag/wheel | Space R 0 1 2 3 4 +/- A C E H M P T X", {0.78f, 0.80f, 0.86f, 0.86f});
+
+    if (state.editMode) {
+        drawText(34.0f, 262.0f, "edit mode: drag a body, Shift-drag changes z height", {0.98f, 0.88f, 0.54f, 0.92f});
+    }
+
+    float eventY = state.editMode ? 286.0f : 262.0f;
+    int shown = 0;
+    for (const EventLogEntry& event : system.events()) {
+        std::ostringstream eventLine;
+        eventLine << std::fixed << std::setprecision(2) << event.time << " yr  " << event.message;
+        drawText(eventY >= 334.0f ? 620.0f : 34.0f, eventY >= 334.0f ? 42.0f + shown * 24.0f : eventY, eventLine.str(), event.color);
+        eventY += 24.0f;
+        ++shown;
+        if (shown >= 4) {
+            break;
+        }
+    }
 
     glPopMatrix();
     glMatrixMode(GL_PROJECTION);

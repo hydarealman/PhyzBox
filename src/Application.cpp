@@ -2,6 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <limits>
 #include <string>
 #include <thread>
 #include <windowsx.h>
@@ -14,10 +18,11 @@ constexpr double MinSimulationSpeed = 0.01;
 constexpr double MaxSimulationSpeed = 8.0;
 constexpr int SpeedSliderHitLeft = 26;
 constexpr int SpeedSliderHitRight = 526;
-constexpr int SpeedSliderHitTop = 170;
-constexpr int SpeedSliderHitBottom = 200;
+constexpr int SpeedSliderHitTop = 194;
+constexpr int SpeedSliderHitBottom = 224;
 constexpr int SpeedSliderLeft = 34;
 constexpr int SpeedSliderRight = 518;
+constexpr double CameraFovY = Pi / 4.0;
 
 bool isPlusKey(WPARAM key) {
     return key == VK_OEM_PLUS || key == VK_ADD || key == '=';
@@ -214,21 +219,31 @@ void Application::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         if (speedSliderHitTest(lastMouse_.x, lastMouse_.y)) {
             speedSliderDragging_ = true;
             mouseDragging_ = false;
+            bodyDragging_ = false;
             setSimulationSpeedFromSlider(lastMouse_.x);
+        } else if (editMode_ && bodyHitTest(lastMouse_.x, lastMouse_.y) >= 0) {
+            beginBodyDrag(lastMouse_.x, lastMouse_.y);
         } else {
             mouseDragging_ = true;
             speedSliderDragging_ = false;
+            bodyDragging_ = false;
         }
         SetCapture(hwnd_);
         break;
     case WM_LBUTTONUP:
         mouseDragging_ = false;
         speedSliderDragging_ = false;
+        bodyDragging_ = false;
         ReleaseCapture();
         break;
     case WM_MOUSEMOVE:
         if (speedSliderDragging_) {
             setSimulationSpeedFromSlider(GET_X_LPARAM(lParam));
+        } else if (bodyDragging_) {
+            updateBodyDrag(
+                GET_X_LPARAM(lParam),
+                GET_Y_LPARAM(lParam),
+                (GetKeyState(VK_SHIFT) & 0x8000) != 0);
         } else if (mouseDragging_) {
             const int x = GET_X_LPARAM(lParam);
             const int y = GET_Y_LPARAM(lParam);
@@ -288,6 +303,25 @@ void Application::handleKey(WPARAM key) {
         showTrails_ = !showTrails_;
     } else if (key == 'G') {
         showGrid_ = !showGrid_;
+    } else if (key == 'H') {
+        showField_ = !showField_;
+    } else if (key == 'P') {
+        showParticles_ = !showParticles_;
+    } else if (key == 'C') {
+        showShadow_ = !showShadow_;
+    } else if (key == 'M') {
+        system_.setCollisionMergingEnabled(!system_.collisionMergingEnabled());
+    } else if (key == 'E') {
+        editMode_ = !editMode_;
+        if (editMode_) {
+            paused_ = true;
+            autoOrbit_ = false;
+        } else {
+            selectedBody_ = -1;
+            bodyDragging_ = false;
+        }
+    } else if (key == 'X') {
+        exportSnapshot();
     } else if (key == 'O') {
         autoOrbit_ = !autoOrbit_;
     } else if (key == 'A') {
@@ -334,7 +368,7 @@ void Application::resetCustomScenario() {
 }
 
 void Application::update(double realDt) {
-    if (autoOrbit_ && !mouseDragging_ && !speedSliderDragging_) {
+    if (autoOrbit_ && !mouseDragging_ && !speedSliderDragging_ && !bodyDragging_) {
         cameraYaw_ += realDt * 0.075;
     }
 
@@ -386,7 +420,13 @@ void Application::render() {
     state.showGrid = showGrid_;
     state.autoOrbit = autoOrbit_;
     state.autoTimeScale = autoTimeScale_;
+    state.showParticles = showParticles_;
+    state.showShadow = showShadow_;
+    state.showField = showField_;
+    state.editMode = editMode_;
+    state.collisionsEnabled = system_.collisionMergingEnabled();
     state.focusIndex = focusIndex_;
+    state.selectedBody = selectedBody_;
     renderer_.render(system_, state);
 }
 
@@ -421,6 +461,135 @@ void Application::setSimulationSpeedFromSlider(int x) {
     simulationSpeed_ = speedFromSliderPosition(t);
     if (!autoTimeScale_) {
         effectiveSimulationSpeed_ = simulationSpeed_;
+    }
+}
+
+void Application::cameraFrame(Vec3& eye, Vec3& right, Vec3& up, Vec3& forward) const {
+    Vec3 target{};
+    const auto& bodies = system_.bodies();
+    if (focusIndex_ >= 0 && focusIndex_ < static_cast<int>(bodies.size())) {
+        target = bodies[static_cast<std::size_t>(focusIndex_)].position;
+    }
+
+    const double cp = std::cos(cameraPitch_);
+    eye = {
+        target.x + cameraDistance_ * cp * std::cos(cameraYaw_),
+        target.y + cameraDistance_ * cp * std::sin(cameraYaw_),
+        target.z + cameraDistance_ * std::sin(cameraPitch_),
+    };
+    forward = normalized(target - eye);
+    right = normalized(cross(forward, {0.0, 0.0, 1.0}));
+    if (lengthSquared(right) <= 1.0e-10) {
+        right = {1.0, 0.0, 0.0};
+    }
+    up = cross(right, forward);
+}
+
+int Application::bodyHitTest(int x, int y) const {
+    Vec3 eye{};
+    Vec3 right{};
+    Vec3 up{};
+    Vec3 forward{};
+    cameraFrame(eye, right, up, forward);
+
+    const double aspect = static_cast<double>(std::max(1, width_)) / static_cast<double>(std::max(1, height_));
+    const double tanHalfFov = std::tan(CameraFovY * 0.5);
+
+    int best = -1;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    const auto& bodies = system_.bodies();
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const Vec3 relative = bodies[i].position - eye;
+        const double depth = dot(relative, forward);
+        if (depth <= 0.01) {
+            continue;
+        }
+
+        const double normalizedX = dot(relative, right) / (depth * tanHalfFov * aspect);
+        const double normalizedY = dot(relative, up) / (depth * tanHalfFov);
+        const double screenX = (normalizedX + 1.0) * 0.5 * static_cast<double>(width_);
+        const double screenY = (1.0 - normalizedY) * 0.5 * static_cast<double>(height_);
+        const double pixelDistance = std::hypot(screenX - static_cast<double>(x), screenY - static_cast<double>(y));
+        const double pixelRadius = std::max(16.0, bodies[i].radius * static_cast<double>(height_) / (depth * tanHalfFov * 2.0));
+
+        if (pixelDistance <= pixelRadius && pixelDistance < bestDistance) {
+            bestDistance = pixelDistance;
+            best = static_cast<int>(i);
+        }
+    }
+
+    return best;
+}
+
+void Application::beginBodyDrag(int x, int y) {
+    selectedBody_ = bodyHitTest(x, y);
+    if (selectedBody_ < 0) {
+        return;
+    }
+    paused_ = true;
+    bodyDragging_ = true;
+    mouseDragging_ = false;
+    speedSliderDragging_ = false;
+    lastMouse_.x = x;
+    lastMouse_.y = y;
+}
+
+void Application::updateBodyDrag(int x, int y, bool verticalOnly) {
+    if (selectedBody_ < 0 || selectedBody_ >= static_cast<int>(system_.bodies().size())) {
+        return;
+    }
+
+    Vec3 eye{};
+    Vec3 right{};
+    Vec3 up{};
+    Vec3 forward{};
+    cameraFrame(eye, right, up, forward);
+
+    const Body& body = system_.bodies()[static_cast<std::size_t>(selectedBody_)];
+    const double depth = std::max(0.1, dot(body.position - eye, forward));
+    const double worldPerPixel = 2.0 * depth * std::tan(CameraFovY * 0.5) / static_cast<double>(std::max(1, height_));
+    const int dx = x - lastMouse_.x;
+    const int dy = y - lastMouse_.y;
+
+    Vec3 delta{};
+    if (verticalOnly) {
+        delta = Vec3{0.0, 0.0, -static_cast<double>(dy) * worldPerPixel};
+    } else {
+        delta = right * (static_cast<double>(dx) * worldPerPixel) -
+            up * (static_cast<double>(dy) * worldPerPixel);
+    }
+
+    system_.setBodyPosition(static_cast<std::size_t>(selectedBody_), body.position + delta);
+    lastMouse_.x = x;
+    lastMouse_.y = y;
+}
+
+void Application::exportSnapshot() const {
+    std::filesystem::create_directories("exports");
+    std::ofstream file("exports/phyzbox_snapshot.csv");
+    if (!file) {
+        return;
+    }
+
+    file << "kind,index,name,time_yr,mass_solar,x_au,y_au,z_au,vx_au_per_yr,vy_au_per_yr,vz_au_per_yr\n";
+    const auto& bodies = system_.bodies();
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const Body& body = bodies[i];
+        file << "body," << i << ",\"" << body.name << "\","
+             << std::setprecision(12) << system_.time() << ','
+             << body.mass << ','
+             << body.position.x << ',' << body.position.y << ',' << body.position.z << ','
+             << body.velocity.x << ',' << body.velocity.y << ',' << body.velocity.z << '\n';
+    }
+
+    const auto& particles = system_.testParticles();
+    for (std::size_t i = 0; i < particles.size(); ++i) {
+        const TestParticle& particle = particles[i];
+        file << "particle," << i << ",\"\","
+             << std::setprecision(12) << system_.time() << ','
+             << 0.0 << ','
+             << particle.position.x << ',' << particle.position.y << ',' << particle.position.z << ','
+             << particle.velocity.x << ',' << particle.velocity.y << ',' << particle.velocity.z << '\n';
     }
 }
 

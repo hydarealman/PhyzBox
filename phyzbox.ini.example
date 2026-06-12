@@ -13,6 +13,8 @@ body_count = 4
 name = "Alpha"
 mass = 1.4
 radius = 0.13
+# Optional real collision radius. Omit for solar-radius estimate.
+# physical_radius = 0.006
 color = 1.0, 0.40, 0.22
 position = -1.30, -0.20, 0.35
 velocity = 0.60, 2.40, -0.70
@@ -40,4 +42,3 @@ radius = 0.085
 color = 0.55, 1.0, 0.72
 position = -0.20, 0.25, -0.70
 velocity = 0.45, 0.10, 1.80
-

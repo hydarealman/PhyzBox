@@ -31,7 +31,13 @@ struct RenderState {
     bool showGrid = true;
     bool autoOrbit = true;
     bool autoTimeScale = true;
+    bool showParticles = true;
+    bool showShadow = true;
+    bool showField = false;
+    bool editMode = false;
+    bool collisionsEnabled = true;
     int focusIndex = -1;
+    int selectedBody = -1;
 };
 
 class Renderer {
@@ -56,10 +62,13 @@ private:
     void setupCamera(const NBodySystem& system, const RenderState& state);
     void renderStars();
     void renderReferenceGrid();
+    void renderGravityField(const NBodySystem& system);
     void renderDepthCues(const NBodySystem& system);
     void renderTrails(const NBodySystem& system);
+    void renderTestParticles(const NBodySystem& system);
+    void renderShadowSystem(const NBodySystem& system);
     void renderGlows(const NBodySystem& system);
-    void renderBodies(const NBodySystem& system, int focusIndex);
+    void renderBodies(const NBodySystem& system, int focusIndex, int selectedIndex);
     void renderFocusMarker(const Body& body);
     void renderSphere(double radius, int stacks, int slices);
     void renderHud(const NBodySystem& system, const RenderState& state);
