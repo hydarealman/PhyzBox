@@ -67,6 +67,7 @@ private:
     void renderTrails(const NBodySystem& system);
     void renderTestParticles(const NBodySystem& system);
     void renderShadowSystem(const NBodySystem& system);
+    void renderAccretionDisks(const NBodySystem& system);
     void renderGlows(const NBodySystem& system);
     void renderBodies(const NBodySystem& system, int focusIndex, int selectedIndex);
     void renderFocusMarker(const Body& body);

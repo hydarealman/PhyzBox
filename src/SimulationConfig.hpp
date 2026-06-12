@@ -8,11 +8,26 @@
 
 namespace phyz {
 
+enum class BodyType {
+    Star,
+    Planet,
+    BlackHole,
+    NeutronStar,
+    WhiteDwarf,
+    MinorBody,
+};
+
+const char* bodyTypeName(BodyType type);
+
 struct BodyInitialConfig {
     std::optional<std::string> name;
+    std::optional<BodyType> type;
     std::optional<double> mass;
     std::optional<double> radius;
     std::optional<double> physicalRadius;
+    std::optional<double> density;
+    std::optional<double> temperature;
+    std::optional<double> luminosity;
     std::optional<Color> color;
     std::optional<Vec3> position;
     std::optional<Vec3> velocity;

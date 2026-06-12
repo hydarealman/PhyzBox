@@ -93,6 +93,33 @@ std::string unquote(std::string value) {
     return value;
 }
 
+std::optional<BodyType> parseBodyType(std::string value) {
+    value = lower(unquote(value));
+    std::replace(value.begin(), value.end(), '-', '_');
+    std::replace(value.begin(), value.end(), ' ', '_');
+
+    if (value == "star" || value == "stellar") {
+        return BodyType::Star;
+    }
+    if (value == "planet" || value == "gas_giant" || value == "terrestrial") {
+        return BodyType::Planet;
+    }
+    if (value == "black_hole" || value == "blackhole" || value == "bh") {
+        return BodyType::BlackHole;
+    }
+    if (value == "neutron_star" || value == "neutronstar" || value == "ns") {
+        return BodyType::NeutronStar;
+    }
+    if (value == "white_dwarf" || value == "whitedwarf" || value == "wd") {
+        return BodyType::WhiteDwarf;
+    }
+    if (value == "minor_body" || value == "asteroid" || value == "comet" || value == "dwarf_planet") {
+        return BodyType::MinorBody;
+    }
+
+    return std::nullopt;
+}
+
 bool parseBodyKey(const std::string& fullKey, int& bodyIndex, std::string& field) {
     std::string key = lower(fullKey);
     std::replace(key.begin(), key.end(), '_', '.');
@@ -148,6 +175,11 @@ void applyBodyField(InitialConditionConfig& config, int index, const std::string
     if (normalizedField == "name") {
         body.name = unquote(value);
         config.enabled = true;
+    } else if (normalizedField == "type" || normalizedField == "body.type") {
+        if (const auto parsed = parseBodyType(value)) {
+            body.type = *parsed;
+            config.enabled = true;
+        }
     } else if (normalizedField == "mass") {
         if (const auto parsed = parseDouble(value)) {
             body.mass = std::max(0.001, *parsed);
@@ -161,6 +193,21 @@ void applyBodyField(InitialConditionConfig& config, int index, const std::string
     } else if (normalizedField == "physical.radius" || normalizedField == "physicalradius" || normalizedField == "collision.radius") {
         if (const auto parsed = parseDouble(value)) {
             body.physicalRadius = std::max(1.0e-5, *parsed);
+            config.enabled = true;
+        }
+    } else if (normalizedField == "density") {
+        if (const auto parsed = parseDouble(value)) {
+            body.density = std::max(1.0e-12, *parsed);
+            config.enabled = true;
+        }
+    } else if (normalizedField == "temperature" || normalizedField == "temp") {
+        if (const auto parsed = parseDouble(value)) {
+            body.temperature = std::max(1.0, *parsed);
+            config.enabled = true;
+        }
+    } else if (normalizedField == "luminosity" || normalizedField == "lum") {
+        if (const auto parsed = parseDouble(value)) {
+            body.luminosity = std::max(0.0, *parsed);
             config.enabled = true;
         }
     } else if (normalizedField == "color" || normalizedField == "colour") {
@@ -182,6 +229,24 @@ void applyBodyField(InitialConditionConfig& config, int index, const std::string
 }
 
 } // namespace
+
+const char* bodyTypeName(BodyType type) {
+    switch (type) {
+    case BodyType::Star:
+        return "star";
+    case BodyType::Planet:
+        return "planet";
+    case BodyType::BlackHole:
+        return "black hole";
+    case BodyType::NeutronStar:
+        return "neutron star";
+    case BodyType::WhiteDwarf:
+        return "white dwarf";
+    case BodyType::MinorBody:
+        return "minor body";
+    }
+    return "unknown";
+}
 
 InitialConditionConfig loadInitialConditionConfig(const std::string& path) {
     InitialConditionConfig config;

@@ -91,6 +91,7 @@ void Renderer::render(const NBodySystem& system, const RenderState& state) {
     if (state.showShadow) {
         renderShadowSystem(system);
     }
+    renderAccretionDisks(system);
     glDepthMask(GL_TRUE);
 
     renderGlows(system);
@@ -422,6 +423,47 @@ void Renderer::renderShadowSystem(const NBodySystem& system) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
+void Renderer::renderAccretionDisks(const NBodySystem& system) {
+    glDisable(GL_LIGHTING);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDepthMask(GL_FALSE);
+
+    for (const Body& body : system.bodies()) {
+        if (body.type != BodyType::BlackHole) {
+            continue;
+        }
+
+        const double inner = std::max(body.radius * 1.20, body.innermostStableCircularOrbit * 18.0);
+        const double diskBoost = clamp(std::log1p(body.accretionDiskMass * 8.0), 0.0, 2.5);
+        const double outer = inner + body.radius * (2.8 + diskBoost);
+        const float alpha = static_cast<float>(0.16 + diskBoost * 0.10);
+
+        glPushMatrix();
+        glTranslated(body.position.x, body.position.y, body.position.z);
+        glRotated(12.0, 1.0, 0.0, 0.0);
+        glRotated(32.0, 0.0, 1.0, 0.0);
+
+        glBegin(GL_TRIANGLE_STRIP);
+        for (int i = 0; i <= 160; ++i) {
+            const double t = 2.0 * Pi * static_cast<double>(i) / 160.0;
+            const double c = std::cos(t);
+            const double s = std::sin(t);
+            const float heat = static_cast<float>(0.55 + 0.45 * std::sin(t * 3.0 + body.accretionDiskMass));
+            glColor4f(1.00f, 0.78f * heat, 0.30f * heat, alpha);
+            glVertex3d(c * inner, s * inner, 0.0);
+            glColor4f(0.95f, 0.30f, 0.08f, alpha * 0.15f);
+            glVertex3d(c * outer, s * outer, 0.0);
+        }
+        glEnd();
+
+        glPopMatrix();
+    }
+
+    glDepthMask(GL_TRUE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
 void Renderer::renderGlows(const NBodySystem& system) {
     glDisable(GL_LIGHTING);
     glDisable(GL_DEPTH_TEST);
@@ -430,9 +472,13 @@ void Renderer::renderGlows(const NBodySystem& system) {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
     for (const Body& body : system.bodies()) {
+        if (body.type == BodyType::BlackHole) {
+            continue;
+        }
+        const float luminosityScale = static_cast<float>(clamp(std::sqrt(std::max(0.02, body.luminosity)), 0.35, 2.8));
         for (int layer = 0; layer < 3; ++layer) {
-            const float alpha = 0.16f / static_cast<float>(layer + 1);
-            glPointSize(static_cast<float>(32 + layer * 24));
+            const float alpha = (0.12f * luminosityScale) / static_cast<float>(layer + 1);
+            glPointSize(static_cast<float>((30 + layer * 22) * luminosityScale));
             glBegin(GL_POINTS);
             const Color glow = scaleColor(body.color, 1.18f, alpha);
             glColor4f(glow.r, glow.g, glow.b, glow.a);
@@ -471,16 +517,38 @@ void Renderer::renderBodies(const NBodySystem& system, int focusIndex, int selec
         glPushMatrix();
         glTranslated(body.position.x, body.position.y, body.position.z);
 
+        const float emissionScale = body.type == BodyType::BlackHole
+            ? 0.02f
+            : static_cast<float>(clamp(0.14 * std::sqrt(std::max(0.01, body.luminosity)), 0.06, 0.55));
         const GLfloat emission[] = {
-            body.color.r * 0.18f,
-            body.color.g * 0.18f,
-            body.color.b * 0.18f,
+            body.color.r * emissionScale,
+            body.color.g * emissionScale,
+            body.color.b * emissionScale,
             1.0f,
         };
         glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emission);
-        glColor4f(body.color.r, body.color.g, body.color.b, 1.0f);
+        if (body.type == BodyType::BlackHole) {
+            glColor4f(0.003f, 0.002f, 0.006f, 1.0f);
+        } else {
+            glColor4f(body.color.r, body.color.g, body.color.b, 1.0f);
+        }
         renderSphere(body.radius, 28, 42);
         glPopMatrix();
+
+        if (body.type == BodyType::BlackHole) {
+            glDisable(GL_LIGHTING);
+            glEnable(GL_BLEND);
+            glLineWidth(1.5f);
+            glColor4f(0.60f, 0.50f, 0.95f, 0.50f);
+            glBegin(GL_LINE_LOOP);
+            const double ring = body.radius * 1.15;
+            for (int k = 0; k < 96; ++k) {
+                const double t = 2.0 * Pi * static_cast<double>(k) / 96.0;
+                glVertex3d(body.position.x + std::cos(t) * ring, body.position.y + std::sin(t) * ring, body.position.z);
+            }
+            glEnd();
+            glEnable(GL_LIGHTING);
+        }
     }
 
     const GLfloat noEmission[] = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -609,6 +677,7 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     line.clear();
     line << "status " << system.systemStatus()
          << " | chaos " << std::scientific << std::setprecision(2) << system.chaosDivergence() << " AU"
+         << " | tide " << std::fixed << std::setprecision(2) << system.maxTidalStress()
          << " | mergers " << std::defaultfloat << system.mergerCount()
          << (state.collisionsEnabled ? " | merge on" : " | merge off");
     drawText(34.0f, 162.0f, line.str(), {0.82f, 0.92f, 1.00f, 0.92f});

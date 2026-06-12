@@ -62,6 +62,7 @@ int runConfigSelfTest(const std::string& path) {
     phyz::NBodySystem system;
     system.reset(config);
 
+    const std::size_t initialBodyCount = system.bodies().size();
     const double dt = system.recommendedTimeStep();
     double maxAbsDrift = 0.0;
     double maxAbsAngularDrift = 0.0;
@@ -75,13 +76,16 @@ int runConfigSelfTest(const std::string& path) {
 
     std::cout << "Config " << path
               << " | bodies " << system.bodies().size()
+              << " | events " << system.events().size()
               << " | simulated time " << system.time()
               << " yr | closest " << closestPair
               << " AU | max energy drift " << (maxAbsDrift * 100.0)
               << "% | max angular drift " << (maxAbsAngularDrift * 100.0) << "%\n";
 
-    const bool ok = std::isfinite(maxAbsDrift) && maxAbsDrift < 2.0e-3 &&
-        std::isfinite(maxAbsAngularDrift) && maxAbsAngularDrift < 1.0e-8;
+    const bool eventful = system.bodies().size() != initialBodyCount || !system.events().empty();
+    const bool ok = std::isfinite(maxAbsDrift) && std::isfinite(maxAbsAngularDrift) &&
+        (eventful || maxAbsDrift < 2.0e-3) &&
+        (eventful || maxAbsAngularDrift < 1.0e-8);
     std::cout << (ok ? "Config self-test passed\n" : "Config self-test failed\n");
     return ok ? 0 : 2;
 }

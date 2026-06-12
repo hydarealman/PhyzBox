@@ -11,6 +11,7 @@ body_count = 4
 
 [body0]
 name = "Alpha"
+type = star
 mass = 1.4
 radius = 0.13
 # Optional real collision radius. Omit for solar-radius estimate.
@@ -21,6 +22,7 @@ velocity = 0.60, 2.40, -0.70
 
 [body1]
 name = "Beta"
+type = star
 mass = 1.0
 radius = 0.11
 color = 0.25, 0.65, 1.0
@@ -29,6 +31,7 @@ velocity = -2.20, 0.35, 1.50
 
 [body2]
 name = "Gamma"
+type = star
 mass = 0.9
 radius = 0.10
 color = 0.95, 0.85, 0.35
@@ -37,8 +40,9 @@ velocity = 1.25, -3.00, -0.80
 
 [body3]
 name = "Delta"
-mass = 0.6
-radius = 0.085
+type = planet
+mass = 0.003
+radius = 0.055
 color = 0.55, 1.0, 0.72
 position = -0.20, 0.25, -0.70
 velocity = 0.45, 0.10, 1.80

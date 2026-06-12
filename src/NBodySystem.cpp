@@ -12,10 +12,127 @@ namespace {
 constexpr std::size_t MaxTrailPoints = 4200;
 constexpr double TrailSamplePeriodYears = 0.004;
 constexpr double AstronomicalG = 4.0 * Pi * Pi;
+constexpr double SpeedOfLightAuPerYear = 63241.07708426628;
 constexpr double SolarRadiusAu = 0.00465047;
+
+double schwarzschildRadius(double massSolar) {
+    return 2.0 * AstronomicalG * massSolar / (SpeedOfLightAuPerYear * SpeedOfLightAuPerYear);
+}
+
+bool isCompactObject(BodyType type) {
+    return type == BodyType::BlackHole || type == BodyType::NeutronStar || type == BodyType::WhiteDwarf;
+}
+
+double defaultPhysicalRadius(BodyType type, double mass) {
+    const double safeMass = std::max(0.001, mass);
+    switch (type) {
+    case BodyType::BlackHole:
+        return schwarzschildRadius(safeMass);
+    case BodyType::NeutronStar:
+        return 8.0e-8;
+    case BodyType::WhiteDwarf:
+        return 0.000045 * std::pow(safeMass, -1.0 / 3.0);
+    case BodyType::Planet:
+        return 0.00042 * std::pow(safeMass / 0.001, 1.0 / 3.0);
+    case BodyType::MinorBody:
+        return 0.000035 * std::pow(safeMass / 1.0e-6, 1.0 / 3.0);
+    case BodyType::Star:
+        return SolarRadiusAu * std::pow(safeMass, 0.8);
+    }
+    return SolarRadiusAu;
+}
+
+double densityFor(double mass, double physicalRadius) {
+    const double radius = std::max(1.0e-10, physicalRadius);
+    return mass / (radius * radius * radius);
+}
+
+double defaultTemperature(BodyType type, double mass) {
+    const double safeMass = std::max(0.001, mass);
+    switch (type) {
+    case BodyType::BlackHole:
+        return 0.0;
+    case BodyType::NeutronStar:
+        return 700000.0;
+    case BodyType::WhiteDwarf:
+        return 14000.0;
+    case BodyType::Planet:
+        return 280.0;
+    case BodyType::MinorBody:
+        return 180.0;
+    case BodyType::Star:
+        return 5778.0 * std::pow(safeMass, 0.52);
+    }
+    return 5778.0;
+}
+
+double defaultLuminosity(BodyType type, double mass) {
+    const double safeMass = std::max(0.001, mass);
+    switch (type) {
+    case BodyType::BlackHole:
+        return 0.0;
+    case BodyType::NeutronStar:
+        return 0.03;
+    case BodyType::WhiteDwarf:
+        return 0.02;
+    case BodyType::Planet:
+    case BodyType::MinorBody:
+        return 0.0;
+    case BodyType::Star:
+        return std::pow(safeMass, 3.5);
+    }
+    return 0.0;
+}
+
+Color temperatureColor(double kelvin) {
+    if (kelvin <= 0.0) {
+        return {0.02f, 0.02f, 0.025f, 1.0f};
+    }
+
+    const double t = clamp(kelvin / 100.0, 10.0, 400.0);
+    double r = 0.0;
+    double g = 0.0;
+    double b = 0.0;
+
+    if (t <= 66.0) {
+        r = 255.0;
+        g = 99.4708025861 * std::log(t) - 161.1195681661;
+        b = t <= 19.0 ? 0.0 : 138.5177312231 * std::log(t - 10.0) - 305.0447927307;
+    } else {
+        r = 329.698727446 * std::pow(t - 60.0, -0.1332047592);
+        g = 288.1221695283 * std::pow(t - 60.0, -0.0755148492);
+        b = 255.0;
+    }
+
+    return {
+        static_cast<float>(clamp(r / 255.0, 0.0, 1.0)),
+        static_cast<float>(clamp(g / 255.0, 0.0, 1.0)),
+        static_cast<float>(clamp(b / 255.0, 0.0, 1.0)),
+        1.0f,
+    };
+}
+
+Color defaultColorFor(BodyType type, double mass) {
+    switch (type) {
+    case BodyType::BlackHole:
+        return {0.015f, 0.012f, 0.018f, 1.0f};
+    case BodyType::NeutronStar:
+        return {0.70f, 0.88f, 1.00f, 1.0f};
+    case BodyType::WhiteDwarf:
+        return {0.82f, 0.90f, 1.00f, 1.0f};
+    case BodyType::Planet:
+        return {0.35f, 0.72f, 0.48f, 1.0f};
+    case BodyType::MinorBody:
+        return {0.58f, 0.52f, 0.45f, 1.0f};
+    case BodyType::Star:
+        return temperatureColor(defaultTemperature(type, mass));
+    }
+    return {1.0f, 1.0f, 1.0f, 1.0f};
+}
 
 Body makeBody(
     std::string name,
+    BodyType type,
     double mass,
     double radius,
     double physicalRadius,
@@ -24,11 +141,17 @@ Body makeBody(
     Vec3 velocity) {
     Body body;
     body.name = std::move(name);
+    body.type = type;
     body.mass = mass;
     body.radius = radius;
     body.physicalRadius = physicalRadius > 0.0
         ? physicalRadius
-        : SolarRadiusAu * std::pow(std::max(0.05, mass), 0.8);
+        : defaultPhysicalRadius(type, mass);
+    body.density = densityFor(mass, body.physicalRadius);
+    body.temperature = defaultTemperature(type, mass);
+    body.luminosity = defaultLuminosity(type, mass);
+    body.schwarzschildRadius = type == BodyType::BlackHole ? schwarzschildRadius(mass) : 0.0;
+    body.innermostStableCircularOrbit = body.schwarzschildRadius * 3.0;
     body.color = color;
     body.position = position;
     body.velocity = velocity;
@@ -104,6 +227,39 @@ Color massWeightedColor(const Body& a, const Body& b) {
     };
 }
 
+double rocheLimit(const Body& primary, const Body& secondary) {
+    if (secondary.mass <= 0.0 || secondary.physicalRadius <= 0.0 ||
+        secondary.type == BodyType::BlackHole || secondary.type == BodyType::NeutronStar) {
+        return 0.0;
+    }
+
+    if (primary.type == BodyType::BlackHole) {
+        return secondary.physicalRadius * std::cbrt(2.0 * primary.mass / secondary.mass);
+    }
+
+    const double densityRatio = std::max(1.0e-12, primary.density / std::max(1.0e-12, secondary.density));
+    return 2.44 * primary.physicalRadius * std::cbrt(densityRatio);
+}
+
+Vec3 accelerationContribution(const Body& source, const Vec3& delta, double softening, double gravitationalConstant) {
+    const double distanceSquared = lengthSquared(delta);
+    if (distanceSquared <= 1.0e-18) {
+        return {};
+    }
+
+    const double distance = std::sqrt(distanceSquared);
+    if (source.type == BodyType::BlackHole && source.schwarzschildRadius > 0.0) {
+        const double effective = std::max(distance - source.schwarzschildRadius, source.schwarzschildRadius * 0.25);
+        const double scale = gravitationalConstant * source.mass / (distance * effective * effective);
+        return delta * scale;
+    }
+
+    const double softenedDistanceSquared = distanceSquared + softening * softening;
+    const double inverseDistance = 1.0 / std::sqrt(softenedDistanceSquared);
+    const double inverseDistanceCubed = inverseDistance * inverseDistance * inverseDistance;
+    return delta * (gravitationalConstant * source.mass * inverseDistanceCubed);
+}
+
 } // namespace
 
 NBodySystem::NBodySystem() {
@@ -136,6 +292,7 @@ void NBodySystem::reset(Scenario scenario) {
         recommendedCameraDistance_ = 6.6;
         bodies_.push_back(makeBody(
             "Trisolaris Alpha",
+            BodyType::Star,
             1.8,
             0.135,
             0.0,
@@ -144,6 +301,7 @@ void NBodySystem::reset(Scenario scenario) {
             scaled({0.12, 0.42, -0.12}, velocityScale)));
         bodies_.push_back(makeBody(
             "Trisolaris Beta",
+            BodyType::Star,
             1.0,
             0.110,
             0.0,
@@ -152,6 +310,7 @@ void NBodySystem::reset(Scenario scenario) {
             scaled({-0.38, 0.05, 0.28}, velocityScale)));
         bodies_.push_back(makeBody(
             "Trisolaris Gamma",
+            BodyType::Star,
             0.8,
             0.100,
             0.0,
@@ -166,6 +325,7 @@ void NBodySystem::reset(Scenario scenario) {
         recommendedCameraDistance_ = 5.4;
         bodies_.push_back(makeBody(
             "Aurelia",
+            BodyType::Star,
             1.0,
             0.090,
             0.0,
@@ -174,6 +334,7 @@ void NBodySystem::reset(Scenario scenario) {
             scaled({0.4662036850, 0.4323657300, 0.0}, velocityScale)));
         bodies_.push_back(makeBody(
             "Borealis",
+            BodyType::Star,
             1.0,
             0.090,
             0.0,
@@ -182,6 +343,7 @@ void NBodySystem::reset(Scenario scenario) {
             scaled({0.4662036850, 0.4323657300, 0.0}, velocityScale)));
         bodies_.push_back(makeBody(
             "Cygnus",
+            BodyType::Star,
             1.0,
             0.090,
             0.0,
@@ -206,6 +368,7 @@ void NBodySystem::reset(Scenario scenario) {
 
         bodies_.push_back(makeBody(
             "Helion",
+            BodyType::Star,
             1.0,
             0.100,
             0.0,
@@ -214,6 +377,7 @@ void NBodySystem::reset(Scenario scenario) {
             rotate({0.0, speed, 0.0})));
         bodies_.push_back(makeBody(
             "Iris",
+            BodyType::Star,
             1.0,
             0.100,
             0.0,
@@ -222,6 +386,7 @@ void NBodySystem::reset(Scenario scenario) {
             rotate({-std::sqrt(3.0) * 0.5 * speed, -0.5 * speed, 0.0})));
         bodies_.push_back(makeBody(
             "Vega",
+            BodyType::Star,
             1.0,
             0.100,
             0.0,
@@ -237,6 +402,7 @@ void NBodySystem::reset(Scenario scenario) {
         recommendedCameraDistance_ = 8.2;
         bodies_.push_back(makeBody(
             "Primary",
+            BodyType::Star,
             1.50,
             0.120,
             0.0,
@@ -245,6 +411,7 @@ void NBodySystem::reset(Scenario scenario) {
             scaled({0.0, 0.7920, 0.0}, velocityScale)));
         bodies_.push_back(makeBody(
             "Companion",
+            BodyType::Star,
             1.20,
             0.105,
             0.0,
@@ -253,6 +420,7 @@ void NBodySystem::reset(Scenario scenario) {
             scaled({0.0, -0.9900, 0.0}, velocityScale)));
         bodies_.push_back(makeBody(
             "Wanderer",
+            BodyType::Star,
             0.28,
             0.070,
             0.0,
@@ -297,27 +465,45 @@ void NBodySystem::reset(const InitialConditionConfig& config) {
         const double mass = bodyConfig != nullptr && bodyConfig->mass
             ? *bodyConfig->mass
             : 0.75 + 0.18 * static_cast<double>(i % 5);
+        const BodyType type = bodyConfig != nullptr && bodyConfig->type
+            ? *bodyConfig->type
+            : BodyType::Star;
         const double radius = bodyConfig != nullptr && bodyConfig->radius
             ? *bodyConfig->radius
-            : 0.085 + 0.010 * static_cast<double>(i % 4);
+            : (type == BodyType::BlackHole ? 0.145 : 0.085 + 0.010 * static_cast<double>(i % 4));
         const double physicalRadius = bodyConfig != nullptr && bodyConfig->physicalRadius
             ? *bodyConfig->physicalRadius
             : 0.0;
         const Color color = bodyConfig != nullptr && bodyConfig->color
             ? *bodyConfig->color
-            : paletteColor(static_cast<std::size_t>(i));
+            : (bodyConfig != nullptr && bodyConfig->type ? defaultColorFor(type, mass) : paletteColor(static_cast<std::size_t>(i)));
         const Vec3 position = bodyConfig != nullptr && bodyConfig->position
             ? *bodyConfig->position
             : generatedPosition(static_cast<std::size_t>(i), bodyCount);
 
         bodies_.push_back(makeBody(
             bodyConfig != nullptr && bodyConfig->name ? *bodyConfig->name : "Body " + std::to_string(i + 1),
+            type,
             mass,
             radius,
             physicalRadius,
             color,
             position,
             {}));
+
+        Body& body = bodies_.back();
+        if (bodyConfig != nullptr && bodyConfig->density) {
+            body.density = *bodyConfig->density;
+        }
+        if (bodyConfig != nullptr && bodyConfig->temperature) {
+            body.temperature = *bodyConfig->temperature;
+            if (!bodyConfig->color) {
+                body.color = temperatureColor(body.temperature);
+            }
+        }
+        if (bodyConfig != nullptr && bodyConfig->luminosity) {
+            body.luminosity = *bodyConfig->luminosity;
+        }
     }
 
     double totalMass = 0.0;
@@ -387,6 +573,8 @@ void NBodySystem::step(double dt) {
         remaining -= subStep;
         elapsedTime_ += direction * subStep;
         detectCloseEncounters();
+        resolveBlackHoleCaptures();
+        detectRocheEvents();
         if (collisionMergingEnabled_) {
             resolveCollisions();
         }
@@ -400,6 +588,8 @@ void NBodySystem::step(double dt) {
         integrateTestParticles(direction * remaining);
         elapsedTime_ += direction * remaining;
         detectCloseEncounters();
+        resolveBlackHoleCaptures();
+        detectRocheEvents();
         if (collisionMergingEnabled_) {
             resolveCollisions();
         }
@@ -548,6 +738,14 @@ double NBodySystem::minSeparation() const {
     return result;
 }
 
+double NBodySystem::maxTidalStress() const {
+    double result = 0.0;
+    for (const Body& body : bodies_) {
+        result = std::max(result, body.tidalStress);
+    }
+    return result;
+}
+
 double NBodySystem::chaosDivergence() const {
     if (bodies_.empty() || shadowBodies_.empty()) {
         return 0.0;
@@ -563,10 +761,7 @@ double NBodySystem::chaosDivergence() const {
 Vec3 NBodySystem::accelerationAt(Vec3 position) const {
     Vec3 result{};
     for (const Body& body : bodies_) {
-        const Vec3 delta = body.position - position;
-        const double softenedDistanceSquared = lengthSquared(delta) + softening_ * softening_;
-        const double inverseDistance = 1.0 / std::sqrt(softenedDistanceSquared);
-        result += delta * (gravitationalConstant_ * body.mass * inverseDistance * inverseDistance * inverseDistance);
+        result += accelerationContribution(body, body.position - position, softening_, gravitationalConstant_);
     }
     return result;
 }
@@ -574,6 +769,23 @@ Vec3 NBodySystem::accelerationAt(Vec3 position) const {
 const char* NBodySystem::systemStatus() const {
     if (bodies_.size() <= 1) {
         return "single remnant";
+    }
+    if (maxTidalStress() > 0.75) {
+        return "Roche limit risk";
+    }
+    for (const Body& primary : bodies_) {
+        if (primary.type != BodyType::BlackHole) {
+            continue;
+        }
+        for (const Body& body : bodies_) {
+            if (&body == &primary) {
+                continue;
+            }
+            const double distance = length(body.position - primary.position);
+            if (distance < std::max(primary.innermostStableCircularOrbit * 12.0, primary.radius * 2.8)) {
+                return "relativistic strong-field zone";
+            }
+        }
     }
     if (minSeparation() < 0.16) {
         return "close encounter";
@@ -600,13 +812,8 @@ void NBodySystem::calculateAccelerationsFor(const std::vector<Body>& source, std
     for (std::size_t i = 0; i < source.size(); ++i) {
         for (std::size_t j = i + 1; j < source.size(); ++j) {
             const Vec3 delta = source[j].position - source[i].position;
-            const double softenedDistanceSquared = lengthSquared(delta) + softening_ * softening_;
-            const double inverseDistance = 1.0 / std::sqrt(softenedDistanceSquared);
-            const double inverseDistanceCubed = inverseDistance * inverseDistance * inverseDistance;
-
-            const Vec3 direction = delta * inverseDistanceCubed;
-            output[i] += direction * (gravitationalConstant_ * source[j].mass);
-            output[j] -= direction * (gravitationalConstant_ * source[i].mass);
+            output[i] += accelerationContribution(source[j], delta, softening_, gravitationalConstant_);
+            output[j] += accelerationContribution(source[i], -delta, softening_, gravitationalConstant_);
         }
     }
 }
@@ -793,6 +1000,74 @@ void NBodySystem::detectCloseEncounters() {
     }
 }
 
+void NBodySystem::resolveBlackHoleCaptures() {
+    bool captured = true;
+    while (captured && bodies_.size() >= 2) {
+        captured = false;
+        for (std::size_t i = 0; i < bodies_.size() && !captured; ++i) {
+            if (bodies_[i].type != BodyType::BlackHole) {
+                continue;
+            }
+            for (std::size_t j = 0; j < bodies_.size(); ++j) {
+                if (i == j) {
+                    continue;
+                }
+                const double distance = length(bodies_[j].position - bodies_[i].position);
+                const double horizon = std::max(bodies_[i].schwarzschildRadius, bodies_[i].physicalRadius);
+                if (distance <= horizon) {
+                    absorbBody(i, j, "event horizon capture");
+                    captured = true;
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void NBodySystem::detectRocheEvents() {
+    for (Body& body : bodies_) {
+        body.tidalStress = 0.0;
+    }
+
+    if (bodies_.size() < 2) {
+        return;
+    }
+
+    for (std::size_t primaryIndex = 0; primaryIndex < bodies_.size(); ++primaryIndex) {
+        for (std::size_t secondaryIndex = 0; secondaryIndex < bodies_.size(); ++secondaryIndex) {
+            if (primaryIndex == secondaryIndex) {
+                continue;
+            }
+
+            const Body& primary = bodies_[primaryIndex];
+            const Body& secondary = bodies_[secondaryIndex];
+            if (secondary.disrupted || isCompactObject(secondary.type)) {
+                continue;
+            }
+
+            const double limit = rocheLimit(primary, secondary);
+            if (limit <= 0.0) {
+                continue;
+            }
+
+            const double distance = length(secondary.position - primary.position);
+            if (distance <= 1.0e-12) {
+                continue;
+            }
+
+            const double stress = limit / distance;
+            bodies_[secondaryIndex].tidalStress = std::max(bodies_[secondaryIndex].tidalStress, stress);
+
+            const bool strongMassRatio = primary.mass > secondary.mass * 3.0;
+            const bool fragileBody = secondary.type == BodyType::Planet || secondary.type == BodyType::MinorBody;
+            if (stress > 1.0 && (primary.type == BodyType::BlackHole || strongMassRatio || fragileBody)) {
+                disruptBody(primaryIndex, secondaryIndex, limit);
+                return;
+            }
+        }
+    }
+}
+
 void NBodySystem::resolveCollisions() {
     bool merged = true;
     while (merged && bodies_.size() >= 2) {
@@ -819,6 +1094,15 @@ void NBodySystem::mergeBodies(std::size_t first, std::size_t second) {
         std::swap(first, second);
     }
 
+    if (bodies_[first].type == BodyType::BlackHole) {
+        absorbBody(first, second, "black hole collision capture");
+        return;
+    }
+    if (bodies_[second].type == BodyType::BlackHole) {
+        absorbBody(second, first, "black hole collision capture");
+        return;
+    }
+
     Body& a = bodies_[first];
     const Body& b = bodies_[second];
     const double combinedMass = a.mass + b.mass;
@@ -829,15 +1113,22 @@ void NBodySystem::mergeBodies(std::size_t first, std::size_t second) {
         a.physicalRadius * a.physicalRadius * a.physicalRadius +
         b.physicalRadius * b.physicalRadius * b.physicalRadius);
     const std::string name = a.name + "+" + b.name;
+    const BodyType resultingType = b.mass > a.mass ? b.type : a.type;
 
     std::ostringstream message;
     message << "merger: " << a.name << " + " << b.name
             << " -> " << combinedMass << " solar masses";
 
     a.name = name;
+    a.type = resultingType;
     a.mass = combinedMass;
     a.radius = combinedRadius;
     a.physicalRadius = combinedPhysicalRadius;
+    a.density = densityFor(a.mass, a.physicalRadius);
+    a.temperature = defaultTemperature(a.type, a.mass);
+    a.luminosity = defaultLuminosity(a.type, a.mass);
+    a.schwarzschildRadius = a.type == BodyType::BlackHole ? schwarzschildRadius(a.mass) : 0.0;
+    a.innermostStableCircularOrbit = a.schwarzschildRadius * 3.0;
     a.color = massWeightedColor(a, b);
     a.position = combinedPosition;
     a.velocity = combinedVelocity;
@@ -854,6 +1145,99 @@ void NBodySystem::mergeBodies(std::size_t first, std::size_t second) {
     rebaselineDiagnostics();
     seedShadowSystem();
     pushEvent(message.str(), {1.00f, 0.44f, 0.32f, 1.0f});
+}
+
+void NBodySystem::absorbBody(std::size_t absorber, std::size_t absorbed, const std::string& reason) {
+    if (absorber >= bodies_.size() || absorbed >= bodies_.size() || absorber == absorbed) {
+        return;
+    }
+
+    Body& primary = bodies_[absorber];
+    const Body secondary = bodies_[absorbed];
+    const double combinedMass = primary.mass + secondary.mass;
+    primary.velocity = (primary.velocity * primary.mass + secondary.velocity * secondary.mass) / combinedMass;
+    primary.position = (primary.position * primary.mass + secondary.position * secondary.mass) / combinedMass;
+    primary.mass = combinedMass;
+    primary.type = BodyType::BlackHole;
+    primary.physicalRadius = schwarzschildRadius(primary.mass);
+    primary.schwarzschildRadius = primary.physicalRadius;
+    primary.innermostStableCircularOrbit = primary.schwarzschildRadius * 3.0;
+    primary.density = densityFor(primary.mass, primary.physicalRadius);
+    primary.temperature = 0.0;
+    primary.luminosity = 0.0;
+    primary.accretionDiskMass += secondary.mass * 0.18;
+    primary.color = defaultColorFor(BodyType::BlackHole, primary.mass);
+    primary.trail.clear();
+    primary.trail.push_back(primary.position);
+
+    std::ostringstream message;
+    message << reason << ": " << primary.name << " swallowed " << secondary.name;
+
+    bodies_.erase(bodies_.begin() + static_cast<std::ptrdiff_t>(absorbed));
+    ++mergerCount_;
+
+    pushEvent(message.str(), {0.75f, 0.62f, 1.00f, 1.0f});
+
+    calculateAccelerations(accelerations_);
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+        bodies_[i].acceleration = accelerations_[i];
+    }
+    rebaselineDiagnostics();
+    seedShadowSystem();
+}
+
+void NBodySystem::disruptBody(std::size_t primary, std::size_t secondary, double limit) {
+    if (primary >= bodies_.size() || secondary >= bodies_.size() || primary == secondary) {
+        return;
+    }
+
+    Body& primaryBody = bodies_[primary];
+    const Body source = bodies_[secondary];
+    spawnDebris(source, primaryBody, source.type == BodyType::Star ? 120 : 70);
+    if (primaryBody.type == BodyType::BlackHole) {
+        primaryBody.accretionDiskMass += source.mass * 0.35;
+    }
+
+    std::ostringstream message;
+    message << "tidal disruption: " << source.name << " crossed Roche limit near "
+            << primaryBody.name << " (" << limit << " AU)";
+    pushEvent(message.str(), {1.00f, 0.72f, 0.34f, 1.0f});
+
+    bodies_.erase(bodies_.begin() + static_cast<std::ptrdiff_t>(secondary));
+    calculateAccelerations(accelerations_);
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+        bodies_[i].acceleration = accelerations_[i];
+    }
+    rebaselineDiagnostics();
+    seedShadowSystem();
+}
+
+void NBodySystem::spawnDebris(const Body& source, const Body& primary, int count) {
+    const Vec3 radial = normalized(source.position - primary.position);
+    Vec3 tangent = normalized(cross({0.0, 0.0, 1.0}, radial));
+    if (lengthSquared(tangent) <= 1.0e-10) {
+        tangent = normalized(cross({0.0, 1.0, 0.0}, radial));
+    }
+    const Vec3 binormal = normalized(cross(radial, tangent));
+    const double spread = std::max(source.physicalRadius * 5.0, 0.008);
+
+    for (int i = 0; i < count; ++i) {
+        const double phase = 2.0 * Pi * static_cast<double>(i) / static_cast<double>(std::max(1, count));
+        const double offset = (static_cast<double>((i * 17) % count) / static_cast<double>(std::max(1, count)) - 0.5) * spread;
+        TestParticle particle;
+        particle.position = source.position +
+            tangent * (std::cos(phase) * spread * 0.45) +
+            binormal * (std::sin(phase) * spread * 0.25) +
+            radial * offset;
+        particle.velocity = source.velocity +
+            tangent * (0.10 * std::sin(phase)) -
+            radial * (0.04 * std::cos(phase));
+        particle.color = source.type == BodyType::Planet
+            ? Color{0.52f, 0.95f, 0.78f, 0.45f}
+            : Color{1.00f, 0.72f, 0.38f, 0.50f};
+        particle.trail.push_back(particle.position);
+        testParticles_.push_back(particle);
+    }
 }
 
 void NBodySystem::pushEvent(std::string message, Color color) {

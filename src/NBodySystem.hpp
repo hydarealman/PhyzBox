@@ -19,9 +19,18 @@ enum class Scenario {
 
 struct Body {
     std::string name;
+    BodyType type = BodyType::Star;
     double mass = 1.0;
     double radius = 0.08;
     double physicalRadius = 0.00465;
+    double density = 1.0;
+    double temperature = 5778.0;
+    double luminosity = 1.0;
+    double schwarzschildRadius = 0.0;
+    double innermostStableCircularOrbit = 0.0;
+    double accretionDiskMass = 0.0;
+    double tidalStress = 0.0;
+    bool disrupted = false;
     Color color{};
     Vec3 position{};
     Vec3 velocity{};
@@ -71,6 +80,7 @@ public:
     [[nodiscard]] Vec3 centerOfMass() const;
     [[nodiscard]] Vec3 accelerationAt(Vec3 position) const;
     [[nodiscard]] double totalMass() const;
+    [[nodiscard]] double maxTidalStress() const;
     [[nodiscard]] double softeningLength() const { return softening_; }
     [[nodiscard]] double recommendedTimeStep() const { return recommendedTimeStep_; }
     [[nodiscard]] double recommendedCameraDistance() const { return recommendedCameraDistance_; }
@@ -93,8 +103,13 @@ private:
     void captureTrail(double dt);
     void seedShadowSystem();
     void detectCloseEncounters();
+    void detectRocheEvents();
     void resolveCollisions();
+    void resolveBlackHoleCaptures();
     void mergeBodies(std::size_t first, std::size_t second);
+    void absorbBody(std::size_t absorber, std::size_t absorbed, const std::string& reason);
+    void disruptBody(std::size_t primary, std::size_t secondary, double rocheLimit);
+    void spawnDebris(const Body& source, const Body& primary, int count);
     void pushEvent(std::string message, Color color);
 
     Scenario scenario_ = Scenario::TrisolarisChaos;

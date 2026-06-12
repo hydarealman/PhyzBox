@@ -100,10 +100,27 @@ mass = 1.4
 position = 1.15, -0.75, -0.25
 ```
 
-支持字段包括 `name`、`mass`、`radius`、`physical_radius`、`color`、`position`、`velocity`。单位仍然是 AU、太阳质量、年；速度单位是 AU/year。`radius` 是屏幕可视半径，`physical_radius` 是碰撞合并判定用的真实半径。
+支持字段包括 `name`、`type`、`mass`、`radius`、`physical_radius`、`density`、`temperature`、`luminosity`、`color`、`position`、`velocity`。单位仍然是 AU、太阳质量、年；速度单位是 AU/year。`radius` 是屏幕可视半径，`physical_radius` 是碰撞合并和洛希极限判定用的真实半径。
 
 `presets/` 里有几个示例场景，可以复制为 `phyzbox.ini` 后按 `0` 重新加载：
 
 - `presets/close-encounter.ini`
 - `presets/four-body-chaos.ini`
+- `presets/black-hole-tde.ini`
+- `presets/compact-remnants.ini`
 - `presets/merger-lab.ini`
+
+## 天体类型和强场效果
+
+配置中的 `type` 支持：
+
+- `star`
+- `planet`
+- `black_hole`
+- `neutron_star`
+- `white_dwarf`
+- `minor_body`
+
+不同类型会自动估算真实半径、密度、温度、亮度和默认颜色。黑洞会使用史瓦西半径 `Rs = 2GM/c²`、事件视界吞噬、`ISCO = 3Rs` 参考内缘和吸积盘视觉；近黑洞引力使用 Paczynski-Wiita 伪牛顿势，能表现强场轨道进动和捕获趋势。它不是完整数值相对论求解器；真正完整 GR 需要求解动态时空度规和爱因斯坦场方程。这里实现的是适合实时交互的强场近似层。
+
+洛希极限会根据天体密度/质量比估算。行星、小天体或恒星进入强潮汐区时会触发 `tidal disruption` 事件，并被撕成测试粒子流；如果主天体是黑洞，碎片会增强吸积盘亮度。
