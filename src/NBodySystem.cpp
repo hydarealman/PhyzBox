@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -23,6 +24,15 @@ bool isCompactObject(BodyType type) {
     return type == BodyType::BlackHole || type == BodyType::NeutronStar || type == BodyType::WhiteDwarf;
 }
 
+int firstSpacecraftIndex(const std::vector<Body>& bodies) {
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        if (bodies[i].type == BodyType::Spacecraft) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 double defaultPhysicalRadius(BodyType type, double mass) {
     const double safeMass = std::max(0.001, mass);
     switch (type) {
@@ -36,6 +46,8 @@ double defaultPhysicalRadius(BodyType type, double mass) {
         return 0.00042 * std::pow(safeMass / 0.001, 1.0 / 3.0);
     case BodyType::MinorBody:
         return 0.000035 * std::pow(safeMass / 1.0e-6, 1.0 / 3.0);
+    case BodyType::Spacecraft:
+        return 8.0e-8;
     case BodyType::Star:
         return SolarRadiusAu * std::pow(safeMass, 0.8);
     }
@@ -60,6 +72,8 @@ double defaultTemperature(BodyType type, double mass) {
         return 280.0;
     case BodyType::MinorBody:
         return 180.0;
+    case BodyType::Spacecraft:
+        return 290.0;
     case BodyType::Star:
         return 5778.0 * std::pow(safeMass, 0.52);
     }
@@ -77,6 +91,7 @@ double defaultLuminosity(BodyType type, double mass) {
         return 0.02;
     case BodyType::Planet:
     case BodyType::MinorBody:
+    case BodyType::Spacecraft:
         return 0.0;
     case BodyType::Star:
         return std::pow(safeMass, 3.5);
@@ -124,6 +139,8 @@ Color defaultColorFor(BodyType type, double mass) {
         return {0.35f, 0.72f, 0.48f, 1.0f};
     case BodyType::MinorBody:
         return {0.58f, 0.52f, 0.45f, 1.0f};
+    case BodyType::Spacecraft:
+        return {0.95f, 0.98f, 1.00f, 1.0f};
     case BodyType::Star:
         return temperatureColor(defaultTemperature(type, mass));
     }
@@ -156,6 +173,42 @@ Body makeBody(
     body.position = position;
     body.velocity = velocity;
     return body;
+}
+
+double defaultRotationPeriod(BodyType type, double mass, std::size_t index) {
+    const double indexOffset = 1.0 + 0.11 * static_cast<double>(index % 5);
+    switch (type) {
+    case BodyType::Star:
+        return (0.045 + 0.018 / std::sqrt(std::max(0.2, mass))) * indexOffset;
+    case BodyType::Planet:
+        return 0.0027 * indexOffset;
+    case BodyType::MinorBody:
+        return 0.00075 * indexOffset;
+    case BodyType::WhiteDwarf:
+        return 0.006 * indexOffset;
+    case BodyType::NeutronStar:
+        return 0.00018 * indexOffset;
+    case BodyType::BlackHole:
+        return 0.018 * indexOffset;
+    case BodyType::Spacecraft:
+        return 0.0009 * indexOffset;
+    }
+    return 0.08;
+}
+
+Vec3 defaultSpinAxis(std::size_t index) {
+    const double i = static_cast<double>(index);
+    return normalized({
+        0.36 * std::sin(i * 1.71 + 0.45),
+        0.28 * std::cos(i * 0.91 + 1.10),
+        1.0,
+    });
+}
+
+void configureDefaultSpin(Body& body, std::size_t index) {
+    body.spinAxis = defaultSpinAxis(index);
+    body.rotationPeriod = defaultRotationPeriod(body.type, body.mass, index);
+    body.rotationAngle = std::fmod(0.73 * static_cast<double>(index), 2.0 * Pi);
 }
 
 Vec3 scaled(Vec3 value, double scale) {
@@ -229,7 +282,8 @@ Color massWeightedColor(const Body& a, const Body& b) {
 
 double rocheLimit(const Body& primary, const Body& secondary) {
     if (secondary.mass <= 0.0 || secondary.physicalRadius <= 0.0 ||
-        secondary.type == BodyType::BlackHole || secondary.type == BodyType::NeutronStar) {
+        secondary.type == BodyType::BlackHole || secondary.type == BodyType::NeutronStar ||
+        secondary.type == BodyType::Spacecraft) {
         return 0.0;
     }
 
@@ -275,6 +329,9 @@ void NBodySystem::reset(Scenario scenario) {
     events_.clear();
     mergerCount_ = 0;
     lastCloseEventTime_ = -1.0e9;
+    lastAssistEventTime_ = -1.0e9;
+    initialSpacecraftSpeed_ = 0.0;
+    spacecraftNearestEncounterDistance_ = std::numeric_limits<double>::infinity();
     elapsedTime_ = 0.0;
     trailTimer_ = 0.0;
 
@@ -428,6 +485,43 @@ void NBodySystem::reset(Scenario scenario) {
             {2.75, 0.0, 0.65},
             scaled({0.0, 0.88, -0.16}, velocityScale)));
         break;
+
+    case Scenario::GravityAssist:
+        softening_ = SolarRadiusAu * 0.35;
+        recommendedTimeStep_ = 0.000045;
+        recommendedCameraDistance_ = 6.2;
+        bodies_.push_back(makeBody(
+            "Helios",
+            BodyType::Star,
+            1.0,
+            0.120,
+            0.0,
+            {1.00f, 0.68f, 0.32f, 1.0f},
+            {0.0, 0.0, 0.0},
+            {0.0, 0.0, 0.0}));
+        bodies_.push_back(makeBody(
+            "Asterion",
+            BodyType::Planet,
+            0.0015,
+            0.070,
+            0.00050,
+            {0.34f, 0.70f, 1.00f, 1.0f},
+            {1.60, 0.0, 0.03},
+            {0.0, 4.98, 0.08}));
+        bodies_.push_back(makeBody(
+            "Daedalus Probe",
+            BodyType::Spacecraft,
+            1.0e-12,
+            0.035,
+            8.0e-8,
+            {0.96f, 0.98f, 1.00f, 1.0f},
+            {1.05, -0.65, 0.14},
+            {3.65, 9.75, -0.45}));
+        break;
+    }
+
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+        configureDefaultSpin(bodies_[i], i);
     }
 
     normalizeCenterOfMass();
@@ -450,6 +544,9 @@ void NBodySystem::reset(const InitialConditionConfig& config) {
     events_.clear();
     mergerCount_ = 0;
     lastCloseEventTime_ = -1.0e9;
+    lastAssistEventTime_ = -1.0e9;
+    initialSpacecraftSpeed_ = 0.0;
+    spacecraftNearestEncounterDistance_ = std::numeric_limits<double>::infinity();
     elapsedTime_ = 0.0;
     trailTimer_ = 0.0;
 
@@ -462,15 +559,20 @@ void NBodySystem::reset(const InitialConditionConfig& config) {
             bodyConfig = &config.bodies[static_cast<std::size_t>(i)];
         }
 
-        const double mass = bodyConfig != nullptr && bodyConfig->mass
-            ? *bodyConfig->mass
-            : 0.75 + 0.18 * static_cast<double>(i % 5);
         const BodyType type = bodyConfig != nullptr && bodyConfig->type
             ? *bodyConfig->type
             : BodyType::Star;
+        const double defaultMass = type == BodyType::Spacecraft
+            ? 1.0e-12
+            : (type == BodyType::Planet ? 0.003 : 0.75 + 0.18 * static_cast<double>(i % 5));
+        const double mass = bodyConfig != nullptr && bodyConfig->mass
+            ? *bodyConfig->mass
+            : defaultMass;
         const double radius = bodyConfig != nullptr && bodyConfig->radius
             ? *bodyConfig->radius
-            : (type == BodyType::BlackHole ? 0.145 : 0.085 + 0.010 * static_cast<double>(i % 4));
+            : (type == BodyType::BlackHole
+                ? 0.145
+                : (type == BodyType::Spacecraft ? 0.035 : 0.085 + 0.010 * static_cast<double>(i % 4)));
         const double physicalRadius = bodyConfig != nullptr && bodyConfig->physicalRadius
             ? *bodyConfig->physicalRadius
             : 0.0;
@@ -492,6 +594,7 @@ void NBodySystem::reset(const InitialConditionConfig& config) {
             {}));
 
         Body& body = bodies_.back();
+        configureDefaultSpin(body, static_cast<std::size_t>(i));
         if (bodyConfig != nullptr && bodyConfig->density) {
             body.density = *bodyConfig->density;
         }
@@ -503,6 +606,15 @@ void NBodySystem::reset(const InitialConditionConfig& config) {
         }
         if (bodyConfig != nullptr && bodyConfig->luminosity) {
             body.luminosity = *bodyConfig->luminosity;
+        }
+        if (bodyConfig != nullptr && bodyConfig->spinAxis && lengthSquared(*bodyConfig->spinAxis) > 1.0e-12) {
+            body.spinAxis = normalized(*bodyConfig->spinAxis);
+        }
+        if (bodyConfig != nullptr && bodyConfig->rotationPeriod) {
+            body.rotationPeriod = *bodyConfig->rotationPeriod;
+        }
+        if (bodyConfig != nullptr && bodyConfig->rotationAngle) {
+            body.rotationAngle = *bodyConfig->rotationAngle;
         }
     }
 
@@ -550,6 +662,8 @@ const char* NBodySystem::scenarioName() const {
         return "Tilted Lagrange triangle";
     case Scenario::HierarchicalTriple:
         return "Binary star with wanderer";
+    case Scenario::GravityAssist:
+        return "Gravity assist flyby";
     case Scenario::Custom:
         return "Custom initial conditions";
     }
@@ -570,9 +684,11 @@ void NBodySystem::step(double dt) {
         integrateYoshida4(direction * subStep);
         integrateShadowYoshida4(direction * subStep);
         integrateTestParticles(direction * subStep);
+        advanceRotations(direction * subStep);
         remaining -= subStep;
         elapsedTime_ += direction * subStep;
         detectCloseEncounters();
+        detectGravityAssist();
         resolveBlackHoleCaptures();
         detectRocheEvents();
         if (collisionMergingEnabled_) {
@@ -586,8 +702,10 @@ void NBodySystem::step(double dt) {
         integrateYoshida4(direction * remaining);
         integrateShadowYoshida4(direction * remaining);
         integrateTestParticles(direction * remaining);
+        advanceRotations(direction * remaining);
         elapsedTime_ += direction * remaining;
         detectCloseEncounters();
+        detectGravityAssist();
         resolveBlackHoleCaptures();
         detectRocheEvents();
         if (collisionMergingEnabled_) {
@@ -627,6 +745,9 @@ void NBodySystem::setBodyVelocity(std::size_t index, Vec3 velocity) {
 void NBodySystem::rebaselineDiagnostics() {
     initialEnergy_ = totalEnergy();
     initialAngularMomentumMagnitude_ = length(totalAngularMomentum());
+    initialSpacecraftSpeed_ = spacecraftSpeed();
+    spacecraftNearestEncounterDistance_ = std::numeric_limits<double>::infinity();
+    spacecraftNearestEncounterDistance_ = spacecraftNearestEncounterDistance();
 }
 
 void NBodySystem::seedTestParticles(int count) {
@@ -746,6 +867,43 @@ double NBodySystem::maxTidalStress() const {
     return result;
 }
 
+double NBodySystem::spacecraftSpeed() const {
+    const int index = firstSpacecraftIndex(bodies_);
+    if (index < 0) {
+        return 0.0;
+    }
+    return length(bodies_[static_cast<std::size_t>(index)].velocity);
+}
+
+double NBodySystem::spacecraftSpeedGain() const {
+    if (initialSpacecraftSpeed_ <= 1.0e-12) {
+        return 0.0;
+    }
+    return (spacecraftSpeed() - initialSpacecraftSpeed_) / initialSpacecraftSpeed_;
+}
+
+double NBodySystem::spacecraftNearestEncounterDistance() const {
+    double currentNearest = std::numeric_limits<double>::infinity();
+    const int craftIndex = firstSpacecraftIndex(bodies_);
+    if (craftIndex < 0) {
+        return 0.0;
+    }
+
+    const Body& craft = bodies_[static_cast<std::size_t>(craftIndex)];
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+        if (static_cast<int>(i) == craftIndex || bodies_[i].type == BodyType::Spacecraft) {
+            continue;
+        }
+        currentNearest = std::min(currentNearest, length(bodies_[i].position - craft.position));
+    }
+
+    const double stored = std::isfinite(spacecraftNearestEncounterDistance_)
+        ? spacecraftNearestEncounterDistance_
+        : currentNearest;
+    const double best = std::min(stored, currentNearest);
+    return std::isfinite(best) ? best : 0.0;
+}
+
 double NBodySystem::chaosDivergence() const {
     if (bodies_.empty() || shadowBodies_.empty()) {
         return 0.0;
@@ -772,6 +930,9 @@ const char* NBodySystem::systemStatus() const {
     }
     if (maxTidalStress() > 0.75) {
         return "Roche limit risk";
+    }
+    if (firstSpacecraftIndex(bodies_) >= 0 && spacecraftNearestEncounterDistance() < 0.22) {
+        return "spacecraft gravity assist";
     }
     for (const Body& primary : bodies_) {
         if (primary.type != BodyType::BlackHole) {
@@ -877,6 +1038,18 @@ void NBodySystem::integrateTestParticles(double dt) {
         particle.position += particle.velocity * dt;
         const Vec3 a1 = accelerationAt(particle.position);
         particle.velocity += a1 * (0.5 * dt);
+    }
+}
+
+void NBodySystem::advanceRotations(double dt) {
+    for (Body& body : bodies_) {
+        if (body.rotationPeriod <= 1.0e-9 || lengthSquared(body.spinAxis) <= 1.0e-12) {
+            continue;
+        }
+        body.rotationAngle = std::fmod(body.rotationAngle + (2.0 * Pi * dt / body.rotationPeriod), 2.0 * Pi);
+        if (body.rotationAngle < 0.0) {
+            body.rotationAngle += 2.0 * Pi;
+        }
     }
 }
 
@@ -997,6 +1170,43 @@ void NBodySystem::detectCloseEncounters() {
                 << " at " << closest << " AU";
         pushEvent(message.str(), {0.90f, 0.78f, 0.42f, 1.0f});
         lastCloseEventTime_ = elapsedTime_;
+    }
+}
+
+void NBodySystem::detectGravityAssist() {
+    const int craftIndex = firstSpacecraftIndex(bodies_);
+    if (craftIndex < 0 || bodies_.size() < 2) {
+        return;
+    }
+
+    const Body& craft = bodies_[static_cast<std::size_t>(craftIndex)];
+    double nearest = std::numeric_limits<double>::infinity();
+    std::size_t nearestIndex = 0;
+    for (std::size_t i = 0; i < bodies_.size(); ++i) {
+        if (static_cast<int>(i) == craftIndex || bodies_[i].type == BodyType::Spacecraft) {
+            continue;
+        }
+        const double distance = length(bodies_[i].position - craft.position);
+        if (distance < nearest) {
+            nearest = distance;
+            nearestIndex = i;
+        }
+    }
+
+    if (!std::isfinite(nearest)) {
+        return;
+    }
+
+    spacecraftNearestEncounterDistance_ = std::min(spacecraftNearestEncounterDistance_, nearest);
+    const Body& flybyBody = bodies_[nearestIndex];
+    const double threshold = std::max(flybyBody.radius * 2.8, 0.11);
+    if (nearest < threshold && elapsedTime_ - lastAssistEventTime_ > 0.08) {
+        std::ostringstream message;
+        message << "gravity assist: " << craft.name << " flyby " << flybyBody.name
+                << " at " << nearest << " AU, speed gain "
+                << (spacecraftSpeedGain() * 100.0) << "%";
+        pushEvent(message.str(), {0.55f, 0.96f, 1.00f, 1.0f});
+        lastAssistEventTime_ = elapsedTime_;
     }
 }
 

@@ -15,6 +15,7 @@ enum class BodyType {
     NeutronStar,
     WhiteDwarf,
     MinorBody,
+    Spacecraft,
 };
 
 const char* bodyTypeName(BodyType type);
@@ -28,6 +29,9 @@ struct BodyInitialConfig {
     std::optional<double> density;
     std::optional<double> temperature;
     std::optional<double> luminosity;
+    std::optional<Vec3> spinAxis;
+    std::optional<double> rotationPeriod;
+    std::optional<double> rotationAngle;
     std::optional<Color> color;
     std::optional<Vec3> position;
     std::optional<Vec3> velocity;

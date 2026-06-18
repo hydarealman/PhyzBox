@@ -70,6 +70,9 @@ private:
     void renderAccretionDisks(const NBodySystem& system);
     void renderGlows(const NBodySystem& system);
     void renderBodies(const NBodySystem& system, int focusIndex, int selectedIndex);
+    void renderSpacecraft(const Body& body);
+    void applySpinTransform(const Body& body);
+    void renderSpinGuides(const Body& body);
     void renderFocusMarker(const Body& body);
     void renderSphere(double radius, int stacks, int slices);
     void renderHud(const NBodySystem& system, const RenderState& state);

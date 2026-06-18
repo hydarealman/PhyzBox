@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 
@@ -116,6 +117,9 @@ std::optional<BodyType> parseBodyType(std::string value) {
     if (value == "minor_body" || value == "asteroid" || value == "comet" || value == "dwarf_planet") {
         return BodyType::MinorBody;
     }
+    if (value == "spacecraft" || value == "probe" || value == "rocket" || value == "ship") {
+        return BodyType::Spacecraft;
+    }
 
     return std::nullopt;
 }
@@ -182,7 +186,7 @@ void applyBodyField(InitialConditionConfig& config, int index, const std::string
         }
     } else if (normalizedField == "mass") {
         if (const auto parsed = parseDouble(value)) {
-            body.mass = std::max(0.001, *parsed);
+            body.mass = std::max(1.0e-12, *parsed);
             config.enabled = true;
         }
     } else if (normalizedField == "radius") {
@@ -192,7 +196,7 @@ void applyBodyField(InitialConditionConfig& config, int index, const std::string
         }
     } else if (normalizedField == "physical.radius" || normalizedField == "physicalradius" || normalizedField == "collision.radius") {
         if (const auto parsed = parseDouble(value)) {
-            body.physicalRadius = std::max(1.0e-5, *parsed);
+            body.physicalRadius = std::max(1.0e-10, *parsed);
             config.enabled = true;
         }
     } else if (normalizedField == "density") {
@@ -208,6 +212,26 @@ void applyBodyField(InitialConditionConfig& config, int index, const std::string
     } else if (normalizedField == "luminosity" || normalizedField == "lum") {
         if (const auto parsed = parseDouble(value)) {
             body.luminosity = std::max(0.0, *parsed);
+            config.enabled = true;
+        }
+    } else if (normalizedField == "spin.axis" || normalizedField == "rotation.axis" || normalizedField == "axis") {
+        if (const auto parsed = parseVec3(value)) {
+            body.spinAxis = normalized(*parsed);
+            config.enabled = true;
+        }
+    } else if (normalizedField == "rotation.period" || normalizedField == "spin.period" || normalizedField == "day.length") {
+        if (const auto parsed = parseDouble(value)) {
+            body.rotationPeriod = std::max(1.0e-7, std::abs(*parsed));
+            config.enabled = true;
+        }
+    } else if (normalizedField == "rotation.angle" || normalizedField == "spin.angle") {
+        if (const auto parsed = parseDouble(value)) {
+            body.rotationAngle = *parsed * Pi / 180.0;
+            config.enabled = true;
+        }
+    } else if (normalizedField == "rotation.angle.radians" || normalizedField == "spin.angle.radians") {
+        if (const auto parsed = parseDouble(value)) {
+            body.rotationAngle = *parsed;
             config.enabled = true;
         }
     } else if (normalizedField == "color" || normalizedField == "colour") {
@@ -244,6 +268,8 @@ const char* bodyTypeName(BodyType type) {
         return "white dwarf";
     case BodyType::MinorBody:
         return "minor body";
+    case BodyType::Spacecraft:
+        return "spacecraft";
     }
     return "unknown";
 }

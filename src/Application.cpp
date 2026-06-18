@@ -299,6 +299,8 @@ void Application::handleKey(WPARAM key) {
         resetScenario(Scenario::InclinedDance);
     } else if (key == '4') {
         resetScenario(Scenario::HierarchicalTriple);
+    } else if (key == '5') {
+        resetScenario(Scenario::GravityAssist);
     } else if (key == 'T') {
         showTrails_ = !showTrails_;
     } else if (key == 'G') {

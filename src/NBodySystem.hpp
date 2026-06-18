@@ -14,7 +14,8 @@ enum class Scenario {
     FigureEight = 1,
     InclinedDance = 2,
     HierarchicalTriple = 3,
-    Custom = 4,
+    GravityAssist = 4,
+    Custom = 5,
 };
 
 struct Body {
@@ -30,6 +31,9 @@ struct Body {
     double innermostStableCircularOrbit = 0.0;
     double accretionDiskMass = 0.0;
     double tidalStress = 0.0;
+    Vec3 spinAxis{0.0, 0.0, 1.0};
+    double rotationPeriod = 0.08;
+    double rotationAngle = 0.0;
     bool disrupted = false;
     Color color{};
     Vec3 position{};
@@ -81,6 +85,9 @@ public:
     [[nodiscard]] Vec3 accelerationAt(Vec3 position) const;
     [[nodiscard]] double totalMass() const;
     [[nodiscard]] double maxTidalStress() const;
+    [[nodiscard]] double spacecraftSpeed() const;
+    [[nodiscard]] double spacecraftSpeedGain() const;
+    [[nodiscard]] double spacecraftNearestEncounterDistance() const;
     [[nodiscard]] double softeningLength() const { return softening_; }
     [[nodiscard]] double recommendedTimeStep() const { return recommendedTimeStep_; }
     [[nodiscard]] double recommendedCameraDistance() const { return recommendedCameraDistance_; }
@@ -97,12 +104,14 @@ private:
     void integrateShadowYoshida4(double dt);
     void integrateShadowLeapfrog(double dt);
     void integrateTestParticles(double dt);
+    void advanceRotations(double dt);
     [[nodiscard]] double adaptiveSubStep(double requestedDt) const;
     void normalizeCenterOfMass();
     void seedTrails();
     void captureTrail(double dt);
     void seedShadowSystem();
     void detectCloseEncounters();
+    void detectGravityAssist();
     void detectRocheEvents();
     void resolveCollisions();
     void resolveBlackHoleCaptures();
@@ -122,6 +131,9 @@ private:
     double recommendedTimeStep_ = 0.004;
     double recommendedCameraDistance_ = 5.8;
     double lastCloseEventTime_ = -1.0e9;
+    double lastAssistEventTime_ = -1.0e9;
+    double initialSpacecraftSpeed_ = 0.0;
+    double spacecraftNearestEncounterDistance_ = 0.0;
     int mergerCount_ = 0;
     bool collisionMergingEnabled_ = true;
     std::vector<Body> bodies_;

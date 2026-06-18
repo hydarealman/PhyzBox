@@ -18,6 +18,7 @@ int runSelfTest() {
         Scenario::FigureEight,
         Scenario::InclinedDance,
         Scenario::HierarchicalTriple,
+        Scenario::GravityAssist,
     };
 
     bool ok = true;

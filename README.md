@@ -45,6 +45,7 @@ g++ -std=c++20 -O2 -Wall -Wextra -pedantic src\*.cpp -o bin\PhyzBox.exe -lopengl
 - `2`：经典 figure-eight 三体轨道
 - `3`：倾斜平面的 3D 拉格朗日三角三体
 - `4`：双星 + 第三天体的层级系统
+- `5`：飞行器借巨行星引力弹弓加速的演示场景
 - `+` / `-`：加快 / 减慢基准模拟速度
 - 拖动画面左上角的 `Base speed` 滑条：连续调节基准模拟速度
 - `A`：开启 / 关闭自动时间倍率
@@ -81,6 +82,8 @@ HUD 中的能量漂移、角动量漂移、最近距离、系统状态、混沌�
 - 混沌影子系统：以 `1e-6 AU` 的初始扰动同时积分，用紫色幽影显示敏感性。
 - 引力场箭头：`H` 打开后在参考面上显示局部引力方向。
 - 编辑模式：`E` 进入后可直接拖动天体重新设置初始条件。
+- 天体自转：每个球体都有自转轴、周期和实时推进的自转角，表面经纬线会随时间转动。
+- 飞行器/引力弹弓：`spacecraft` 类型会作为低质量真实受力体积分，靠运动行星的引力飞掠自然改变速度，HUD 会显示飞行器速度、速度增益和最近飞掠距离。
 
 ## 自定义初始条件
 
@@ -100,7 +103,7 @@ mass = 1.4
 position = 1.15, -0.75, -0.25
 ```
 
-支持字段包括 `name`、`type`、`mass`、`radius`、`physical_radius`、`density`、`temperature`、`luminosity`、`color`、`position`、`velocity`。单位仍然是 AU、太阳质量、年；速度单位是 AU/year。`radius` 是屏幕可视半径，`physical_radius` 是碰撞合并和洛希极限判定用的真实半径。
+支持字段包括 `name`、`type`、`mass`、`radius`、`physical_radius`、`density`、`temperature`、`luminosity`、`spin_axis`、`rotation_period`、`rotation_angle`、`color`、`position`、`velocity`。单位仍然是 AU、太阳质量、年；速度单位是 AU/year。`radius` 是屏幕可视半径，`physical_radius` 是碰撞合并和洛希极限判定用的真实半径；`rotation_period` 单位是年，`rotation_angle` 单位是角度。
 
 `presets/` 里有几个示例场景，可以复制为 `phyzbox.ini` 后按 `0` 重新加载：
 
@@ -108,6 +111,7 @@ position = 1.15, -0.75, -0.25
 - `presets/four-body-chaos.ini`
 - `presets/black-hole-tde.ini`
 - `presets/compact-remnants.ini`
+- `presets/gravity-assist.ini`
 - `presets/merger-lab.ini`
 
 ## 天体类型和强场效果
@@ -120,6 +124,7 @@ position = 1.15, -0.75, -0.25
 - `neutron_star`
 - `white_dwarf`
 - `minor_body`
+- `spacecraft`
 
 不同类型会自动估算真实半径、密度、温度、亮度和默认颜色。黑洞会使用史瓦西半径 `Rs = 2GM/c²`、事件视界吞噬、`ISCO = 3Rs` 参考内缘和吸积盘视觉；近黑洞引力使用 Paczynski-Wiita 伪牛顿势，能表现强场轨道进动和捕获趋势。它不是完整数值相对论求解器；真正完整 GR 需要求解动态时空度规和爱因斯坦场方程。这里实现的是适合实时交互的强场近似层。
 

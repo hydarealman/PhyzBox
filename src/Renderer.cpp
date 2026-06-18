@@ -517,6 +517,14 @@ void Renderer::renderBodies(const NBodySystem& system, int focusIndex, int selec
         glPushMatrix();
         glTranslated(body.position.x, body.position.y, body.position.z);
 
+        if (body.type == BodyType::Spacecraft) {
+            glDisable(GL_LIGHTING);
+            renderSpacecraft(body);
+            glEnable(GL_LIGHTING);
+            glPopMatrix();
+            continue;
+        }
+
         const float emissionScale = body.type == BodyType::BlackHole
             ? 0.02f
             : static_cast<float>(clamp(0.14 * std::sqrt(std::max(0.01, body.luminosity)), 0.06, 0.55));
@@ -532,7 +540,13 @@ void Renderer::renderBodies(const NBodySystem& system, int focusIndex, int selec
         } else {
             glColor4f(body.color.r, body.color.g, body.color.b, 1.0f);
         }
+        applySpinTransform(body);
         renderSphere(body.radius, 28, 42);
+        if (body.type != BodyType::BlackHole) {
+            glDisable(GL_LIGHTING);
+            renderSpinGuides(body);
+            glEnable(GL_LIGHTING);
+        }
         glPopMatrix();
 
         if (body.type == BodyType::BlackHole) {
@@ -561,6 +575,135 @@ void Renderer::renderBodies(const NBodySystem& system, int focusIndex, int selec
     if (selectedIndex >= 0 && selectedIndex < static_cast<int>(bodies.size()) && selectedIndex != focusIndex) {
         renderFocusMarker(bodies[static_cast<std::size_t>(selectedIndex)]);
     }
+}
+
+void Renderer::renderSpacecraft(const Body& body) {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glLineWidth(1.4f);
+
+    Vec3 forward = normalized(body.velocity);
+    if (lengthSquared(forward) <= 1.0e-12) {
+        forward = {1.0, 0.0, 0.0};
+    }
+    Vec3 right = normalized(cross(forward, {0.0, 0.0, 1.0}));
+    if (lengthSquared(right) <= 1.0e-12) {
+        right = {0.0, 1.0, 0.0};
+    }
+    const Vec3 up = normalized(cross(right, forward));
+
+    const double scale = body.radius;
+    const Vec3 nose = forward * (scale * 2.4);
+    const Vec3 tail = -forward * (scale * 1.35);
+    const Vec3 leftWing = tail - right * (scale * 0.90);
+    const Vec3 rightWing = tail + right * (scale * 0.90);
+    const Vec3 topFin = tail + up * (scale * 0.72);
+    const Vec3 bottomFin = tail - up * (scale * 0.52);
+
+    glBegin(GL_TRIANGLES);
+    glColor4f(body.color.r, body.color.g, body.color.b, 0.96f);
+    glVertex3d(nose.x, nose.y, nose.z);
+    glColor4f(0.62f, 0.78f, 1.00f, 0.86f);
+    glVertex3d(leftWing.x, leftWing.y, leftWing.z);
+    glVertex3d(topFin.x, topFin.y, topFin.z);
+
+    glColor4f(body.color.r, body.color.g, body.color.b, 0.92f);
+    glVertex3d(nose.x, nose.y, nose.z);
+    glColor4f(0.48f, 0.64f, 0.92f, 0.78f);
+    glVertex3d(topFin.x, topFin.y, topFin.z);
+    glVertex3d(rightWing.x, rightWing.y, rightWing.z);
+
+    glColor4f(0.85f, 0.92f, 1.00f, 0.88f);
+    glVertex3d(nose.x, nose.y, nose.z);
+    glColor4f(0.40f, 0.54f, 0.82f, 0.74f);
+    glVertex3d(rightWing.x, rightWing.y, rightWing.z);
+    glVertex3d(bottomFin.x, bottomFin.y, bottomFin.z);
+
+    glColor4f(0.92f, 0.96f, 1.00f, 0.88f);
+    glVertex3d(nose.x, nose.y, nose.z);
+    glColor4f(0.50f, 0.66f, 0.92f, 0.72f);
+    glVertex3d(bottomFin.x, bottomFin.y, bottomFin.z);
+    glVertex3d(leftWing.x, leftWing.y, leftWing.z);
+    glEnd();
+
+    const Vec3 plumeStart = tail - forward * (scale * 0.10);
+    const Vec3 plumeEnd = tail - forward * (scale * 4.1);
+    glBegin(GL_LINES);
+    glColor4f(0.95f, 0.98f, 1.00f, 0.70f);
+    glVertex3d(plumeStart.x, plumeStart.y, plumeStart.z);
+    glColor4f(1.00f, 0.42f, 0.16f, 0.05f);
+    glVertex3d(plumeEnd.x, plumeEnd.y, plumeEnd.z);
+    glEnd();
+
+    glPointSize(5.0f);
+    glBegin(GL_POINTS);
+    glColor4f(0.88f, 0.96f, 1.00f, 0.95f);
+    glVertex3d(0.0, 0.0, 0.0);
+    glEnd();
+    glPointSize(1.0f);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+void Renderer::applySpinTransform(const Body& body) {
+    Vec3 axis = normalized(body.spinAxis);
+    if (lengthSquared(axis) <= 1.0e-12) {
+        axis = {0.0, 0.0, 1.0};
+    }
+
+    const Vec3 localZ{0.0, 0.0, 1.0};
+    const double alignment = clamp(dot(localZ, axis), -1.0, 1.0);
+    Vec3 rotateAxis = cross(localZ, axis);
+    if (lengthSquared(rotateAxis) > 1.0e-12) {
+        rotateAxis = normalized(rotateAxis);
+        glRotated(std::acos(alignment) * 180.0 / Pi, rotateAxis.x, rotateAxis.y, rotateAxis.z);
+    } else if (alignment < 0.0) {
+        glRotated(180.0, 1.0, 0.0, 0.0);
+    }
+    glRotated(body.rotationAngle * 180.0 / Pi, 0.0, 0.0, 1.0);
+}
+
+void Renderer::renderSpinGuides(const Body& body) {
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDepthMask(GL_FALSE);
+    glLineWidth(1.0f);
+
+    const double radius = body.radius * 1.012;
+    const Color guide = scaleColor(body.color, 1.35f, 0.34f);
+
+    glColor4f(guide.r, guide.g, guide.b, guide.a);
+    glBegin(GL_LINE_LOOP);
+    for (int i = 0; i < 96; ++i) {
+        const double t = 2.0 * Pi * static_cast<double>(i) / 96.0;
+        glVertex3d(std::cos(t) * radius, std::sin(t) * radius, 0.0);
+    }
+    glEnd();
+
+    for (int meridian = 0; meridian < 3; ++meridian) {
+        const double turn = 2.0 * Pi * static_cast<double>(meridian) / 3.0;
+        const double c = std::cos(turn);
+        const double s = std::sin(turn);
+        glColor4f(guide.r, guide.g, guide.b, guide.a * 0.62f);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < 96; ++i) {
+            const double t = 2.0 * Pi * static_cast<double>(i) / 96.0;
+            const double x = std::cos(t) * radius;
+            const double z = std::sin(t) * radius;
+            glVertex3d(x * c, x * s, z);
+        }
+        glEnd();
+    }
+
+    glLineWidth(1.5f);
+    glBegin(GL_LINES);
+    glColor4f(0.90f, 0.96f, 1.00f, 0.45f);
+    glVertex3d(0.0, 0.0, radius * 1.10);
+    glColor4f(0.90f, 0.96f, 1.00f, 0.05f);
+    glVertex3d(0.0, 0.0, radius * 1.82);
+    glEnd();
+
+    glDepthMask(GL_TRUE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 void Renderer::renderFocusMarker(const Body& body) {
@@ -633,8 +776,8 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     glColor4f(0.02f, 0.03f, 0.06f, 0.56f);
     glVertex2f(18.0f, 18.0f);
     glVertex2f(552.0f, 18.0f);
-    glVertex2f(552.0f, 342.0f);
-    glVertex2f(18.0f, 342.0f);
+    glVertex2f(552.0f, 370.0f);
+    glVertex2f(18.0f, 370.0f);
     glEnd();
 
     std::ostringstream line;
@@ -716,18 +859,30 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     glVertex2f(knobX - knobWidth * 0.5f, sliderY + sliderHeight + 5.0f);
     glEnd();
 
-    drawText(34.0f, 238.0f, "Mouse drag/wheel | Space R 0 1 2 3 4 +/- A C E H M P T X", {0.78f, 0.80f, 0.86f, 0.86f});
-
-    if (state.editMode) {
-        drawText(34.0f, 262.0f, "edit mode: drag a body, Shift-drag changes z height", {0.98f, 0.88f, 0.54f, 0.92f});
+    const bool hasSpacecraft = system.spacecraftSpeed() > 0.0;
+    const float controlsY = hasSpacecraft ? 262.0f : 238.0f;
+    if (hasSpacecraft) {
+        line.str("");
+        line.clear();
+        line << std::fixed << std::setprecision(2)
+             << "spacecraft " << system.spacecraftSpeed() << " AU/yr"
+             << " | gain " << (system.spacecraftSpeedGain() * 100.0) << "%"
+             << " | best flyby " << system.spacecraftNearestEncounterDistance() << " AU";
+        drawText(34.0f, 238.0f, line.str(), {0.55f, 0.96f, 1.00f, 0.92f});
     }
 
-    float eventY = state.editMode ? 286.0f : 262.0f;
+    drawText(34.0f, controlsY, "Mouse drag/wheel | Space R 0 1 2 3 4 5 +/- A C E H M P T X", {0.78f, 0.80f, 0.86f, 0.86f});
+
+    if (state.editMode) {
+        drawText(34.0f, controlsY + 24.0f, "edit mode: drag a body, Shift-drag changes z height", {0.98f, 0.88f, 0.54f, 0.92f});
+    }
+
+    float eventY = controlsY + (state.editMode ? 48.0f : 24.0f);
     int shown = 0;
     for (const EventLogEntry& event : system.events()) {
         std::ostringstream eventLine;
         eventLine << std::fixed << std::setprecision(2) << event.time << " yr  " << event.message;
-        drawText(eventY >= 334.0f ? 620.0f : 34.0f, eventY >= 334.0f ? 42.0f + shown * 24.0f : eventY, eventLine.str(), event.color);
+        drawText(eventY >= 358.0f ? 620.0f : 34.0f, eventY >= 358.0f ? 42.0f + shown * 24.0f : eventY, eventLine.str(), event.color);
         eventY += 24.0f;
         ++shown;
         if (shown >= 4) {
