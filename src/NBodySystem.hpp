@@ -15,7 +15,14 @@ enum class Scenario {
     InclinedDance = 2,
     HierarchicalTriple = 3,
     GravityAssist = 4,
-    Custom = 5,
+    ProceduralUniverse = 5,
+    Custom = 6,
+};
+
+struct ExplorerControlState {
+    Vec3 thrustDirection{};
+    bool boost = false;
+    bool brake = false;
 };
 
 struct Body {
@@ -34,6 +41,13 @@ struct Body {
     Vec3 spinAxis{0.0, 0.0, 1.0};
     double rotationPeriod = 0.08;
     double rotationAngle = 0.0;
+    bool proceduralOrbit = false;
+    double orbitRadius = 0.0;
+    double orbitPhase = 0.0;
+    double orbitAngularSpeed = 0.0;
+    double orbitInclination = 0.0;
+    double orbitAscendingNode = 0.0;
+    double atmosphereRadius = 0.0;
     bool disrupted = false;
     Color color{};
     Vec3 position{};
@@ -66,6 +80,7 @@ public:
     void setBodyVelocity(std::size_t index, Vec3 velocity);
     void rebaselineDiagnostics();
     void seedTestParticles(int count);
+    void setExplorerControlState(ExplorerControlState control);
 
     [[nodiscard]] const std::vector<Body>& bodies() const { return bodies_; }
     [[nodiscard]] const std::vector<Body>& shadowBodies() const { return shadowBodies_; }
@@ -88,6 +103,11 @@ public:
     [[nodiscard]] double spacecraftSpeed() const;
     [[nodiscard]] double spacecraftSpeedGain() const;
     [[nodiscard]] double spacecraftNearestEncounterDistance() const;
+    [[nodiscard]] int spacecraftIndex() const;
+    [[nodiscard]] int explorerNearestPlanetIndex() const;
+    [[nodiscard]] double explorerNearestPlanetDistance() const;
+    [[nodiscard]] double explorerLocalGravity() const;
+    [[nodiscard]] double explorerEscapeSpeed() const;
     [[nodiscard]] double softeningLength() const { return softening_; }
     [[nodiscard]] double recommendedTimeStep() const { return recommendedTimeStep_; }
     [[nodiscard]] double recommendedCameraDistance() const { return recommendedCameraDistance_; }
@@ -104,6 +124,11 @@ private:
     void integrateShadowYoshida4(double dt);
     void integrateShadowLeapfrog(double dt);
     void integrateTestParticles(double dt);
+    void stepProceduralUniverse(double dt);
+    void generateProceduralUniverse();
+    void updateProceduralOrbits();
+    [[nodiscard]] Vec3 proceduralGravityAt(Vec3 position) const;
+    void detectExplorationEvents();
     void advanceRotations(double dt);
     [[nodiscard]] double adaptiveSubStep(double requestedDt) const;
     void normalizeCenterOfMass();
@@ -132,8 +157,10 @@ private:
     double recommendedCameraDistance_ = 5.8;
     double lastCloseEventTime_ = -1.0e9;
     double lastAssistEventTime_ = -1.0e9;
+    double lastExplorationEventTime_ = -1.0e9;
     double initialSpacecraftSpeed_ = 0.0;
     double spacecraftNearestEncounterDistance_ = 0.0;
+    ExplorerControlState explorerControl_{};
     int mergerCount_ = 0;
     bool collisionMergingEnabled_ = true;
     std::vector<Body> bodies_;

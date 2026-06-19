@@ -161,7 +161,8 @@ void Renderer::createStars() {
 
 void Renderer::setupCamera(const NBodySystem& system, const RenderState& state) {
     const float aspect = static_cast<float>(std::max(1, state.width)) / static_cast<float>(std::max(1, state.height));
-    const auto projection = perspective(static_cast<float>(Pi / 4.0), aspect, 0.03f, 220.0f);
+    const float zFar = system.scenario() == Scenario::ProceduralUniverse ? 360.0f : 220.0f;
+    const auto projection = perspective(static_cast<float>(Pi / 4.0), aspect, 0.03f, zFar);
 
     const Vec3 target = cameraTarget(system, state.focusIndex);
     const double cp = std::cos(state.cameraPitch);
@@ -471,8 +472,12 @@ void Renderer::renderGlows(const NBodySystem& system) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE);
 
+    const bool explorationMode = system.scenario() == Scenario::ProceduralUniverse;
     for (const Body& body : system.bodies()) {
         if (body.type == BodyType::BlackHole) {
+            continue;
+        }
+        if (explorationMode && body.type != BodyType::Star && body.type != BodyType::Spacecraft) {
             continue;
         }
         const float luminosityScale = static_cast<float>(clamp(std::sqrt(std::max(0.02, body.luminosity)), 0.35, 2.8));
@@ -511,6 +516,7 @@ void Renderer::renderBodies(const NBodySystem& system, int focusIndex, int selec
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 54.0f);
 
+    const bool explorationMode = system.scenario() == Scenario::ProceduralUniverse;
     const auto& bodies = system.bodies();
     for (std::size_t i = 0; i < bodies.size(); ++i) {
         const Body& body = bodies[i];
@@ -541,8 +547,8 @@ void Renderer::renderBodies(const NBodySystem& system, int focusIndex, int selec
             glColor4f(body.color.r, body.color.g, body.color.b, 1.0f);
         }
         applySpinTransform(body);
-        renderSphere(body.radius, 28, 42);
-        if (body.type != BodyType::BlackHole) {
+        renderSphere(body.radius, explorationMode ? 12 : 28, explorationMode ? 20 : 42);
+        if (body.type != BodyType::BlackHole && (!explorationMode || i == 0 || body.radius > 0.12)) {
             glDisable(GL_LIGHTING);
             renderSpinGuides(body);
             glEnable(GL_LIGHTING);
@@ -802,27 +808,52 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
 
     line.str("");
     line.clear();
-    line << std::fixed << std::setprecision(6)
-         << "dt " << state.physicsDt << " yr"
-         << " | closest " << std::setprecision(3) << system.minSeparation() << " AU"
-         << " | softening " << std::setprecision(4) << system.softeningLength() << " AU";
+    const bool explorationMode = system.scenario() == Scenario::ProceduralUniverse;
+    if (explorationMode) {
+        const int nearest = system.explorerNearestPlanetIndex();
+        const auto& bodies = system.bodies();
+        line << "worlds " << (bodies.size() >= 2 ? bodies.size() - 2 : 0);
+        if (nearest >= 0 && nearest < static_cast<int>(bodies.size())) {
+            line << " | nearest " << bodies[static_cast<std::size_t>(nearest)].name
+                 << " " << std::fixed << std::setprecision(2)
+                 << system.explorerNearestPlanetDistance() << " AU";
+        }
+    } else {
+        line << std::fixed << std::setprecision(6)
+             << "dt " << state.physicsDt << " yr"
+             << " | closest " << std::setprecision(3) << system.minSeparation() << " AU"
+             << " | softening " << std::setprecision(4) << system.softeningLength() << " AU";
+    }
     drawText(34.0f, 114.0f, line.str(), {0.72f, 0.86f, 1.00f, 0.90f});
 
     line.str("");
     line.clear();
-    line << std::fixed << std::setprecision(5)
-         << "energy drift " << (system.energyDrift() * 100.0) << "%"
-         << " | angular drift " << (system.angularMomentumDrift() * 100.0) << "%"
-         << " | fps " << std::setprecision(0) << state.fps;
+    if (explorationMode) {
+        line << std::fixed << std::setprecision(2)
+             << "ship " << system.spacecraftSpeed() << " AU/yr"
+             << " | net gravity " << system.explorerLocalGravity() << " AU/yr^2"
+             << " | escape " << system.explorerEscapeSpeed() << " AU/yr";
+    } else {
+        line << std::fixed << std::setprecision(5)
+             << "energy drift " << (system.energyDrift() * 100.0) << "%"
+             << " | angular drift " << (system.angularMomentumDrift() * 100.0) << "%"
+             << " | fps " << std::setprecision(0) << state.fps;
+    }
     drawText(34.0f, 138.0f, line.str(), {0.93f, 0.80f, 0.60f, 0.92f});
 
     line.str("");
     line.clear();
-    line << "status " << system.systemStatus()
-         << " | chaos " << std::scientific << std::setprecision(2) << system.chaosDivergence() << " AU"
-         << " | tide " << std::fixed << std::setprecision(2) << system.maxTidalStress()
-         << " | mergers " << std::defaultfloat << system.mergerCount()
-         << (state.collisionsEnabled ? " | merge on" : " | merge off");
+    if (explorationMode) {
+        line << "status " << system.systemStatus()
+             << " | fps " << std::fixed << std::setprecision(0) << state.fps
+             << " | thrust W/S A/D Q/E Shift Ctrl";
+    } else {
+        line << "status " << system.systemStatus()
+             << " | chaos " << std::scientific << std::setprecision(2) << system.chaosDivergence() << " AU"
+             << " | tide " << std::fixed << std::setprecision(2) << system.maxTidalStress()
+             << " | mergers " << std::defaultfloat << system.mergerCount()
+             << (state.collisionsEnabled ? " | merge on" : " | merge off");
+    }
     drawText(34.0f, 162.0f, line.str(), {0.82f, 0.92f, 1.00f, 0.92f});
 
     line.str("");
@@ -859,7 +890,7 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     glVertex2f(knobX - knobWidth * 0.5f, sliderY + sliderHeight + 5.0f);
     glEnd();
 
-    const bool hasSpacecraft = system.spacecraftSpeed() > 0.0;
+    const bool hasSpacecraft = system.spacecraftSpeed() > 0.0 && !explorationMode;
     const float controlsY = hasSpacecraft ? 262.0f : 238.0f;
     if (hasSpacecraft) {
         line.str("");
@@ -871,7 +902,11 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
         drawText(34.0f, 238.0f, line.str(), {0.55f, 0.96f, 1.00f, 0.92f});
     }
 
-    drawText(34.0f, controlsY, "Mouse drag/wheel | Space R 0 1 2 3 4 5 +/- A C E H M P T X", {0.78f, 0.80f, 0.86f, 0.86f});
+    if (explorationMode) {
+        drawText(34.0f, controlsY, "Fly W/S A/D Q/E | Shift boost Ctrl brake | Mouse/wheel | Space R 1-6 T G H", {0.78f, 0.80f, 0.86f, 0.86f});
+    } else {
+        drawText(34.0f, controlsY, "Mouse drag/wheel | Space R 0 1 2 3 4 5 6 +/- A C E H M P T X", {0.78f, 0.80f, 0.86f, 0.86f});
+    }
 
     if (state.editMode) {
         drawText(34.0f, controlsY + 24.0f, "edit mode: drag a body, Shift-drag changes z height", {0.98f, 0.88f, 0.54f, 0.92f});

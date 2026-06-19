@@ -34,6 +34,7 @@ private:
     void resetScenario(Scenario scenario);
     void resetCustomScenario();
     void update(double realDt);
+    void updateExplorerControls();
     void render();
     void resize(int width, int height);
     [[nodiscard]] double automaticTimeScale() const;

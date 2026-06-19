@@ -91,11 +91,45 @@ int runConfigSelfTest(const std::string& path) {
     return ok ? 0 : 2;
 }
 
+int runExplorerSelfTest() {
+    phyz::NBodySystem system;
+    system.reset(phyz::Scenario::ProceduralUniverse);
+
+    phyz::ExplorerControlState control;
+    control.thrustDirection = phyz::normalized(phyz::Vec3{1.0, 0.25, 0.05});
+    control.boost = true;
+    system.setExplorerControlState(control);
+
+    const double dt = system.recommendedTimeStep();
+    for (int i = 0; i < 2500; ++i) {
+        system.step(dt);
+    }
+
+    const bool ok = system.bodies().size() >= 200 &&
+        system.spacecraftIndex() >= 0 &&
+        system.explorerNearestPlanetIndex() >= 0 &&
+        std::isfinite(system.spacecraftSpeed()) &&
+        std::isfinite(system.explorerLocalGravity()) &&
+        system.explorerNearestPlanetDistance() > 0.0;
+
+    std::cout << "Explorer mode | bodies " << system.bodies().size()
+              << " | ship speed " << system.spacecraftSpeed()
+              << " AU/yr | nearest planet distance "
+              << system.explorerNearestPlanetDistance()
+              << " AU | net gravity " << system.explorerLocalGravity()
+              << " AU/yr^2\n";
+    std::cout << (ok ? "Explorer self-test passed\n" : "Explorer self-test failed\n");
+    return ok ? 0 : 2;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc > 1 && std::string(argv[1]) == "--self-test") {
         return runSelfTest();
+    }
+    if (argc > 1 && std::string(argv[1]) == "--self-test-explorer") {
+        return runExplorerSelfTest();
     }
     if (argc > 2 && std::string(argv[1]) == "--self-test-config") {
         return runConfigSelfTest(argv[2]);

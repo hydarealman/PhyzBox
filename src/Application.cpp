@@ -32,6 +32,10 @@ bool isMinusKey(WPARAM key) {
     return key == VK_OEM_MINUS || key == VK_SUBTRACT || key == '-';
 }
 
+bool keyDown(int key) {
+    return (GetAsyncKeyState(key) & 0x8000) != 0;
+}
+
 double speedFromSliderPosition(double t) {
     t = clamp(t, 0.0, 1.0);
     return MinSimulationSpeed * std::pow(MaxSimulationSpeed / MinSimulationSpeed, t);
@@ -301,6 +305,8 @@ void Application::handleKey(WPARAM key) {
         resetScenario(Scenario::HierarchicalTriple);
     } else if (key == '5') {
         resetScenario(Scenario::GravityAssist);
+    } else if (key == '6') {
+        resetScenario(Scenario::ProceduralUniverse);
     } else if (key == 'T') {
         showTrails_ = !showTrails_;
     } else if (key == 'G') {
@@ -313,7 +319,7 @@ void Application::handleKey(WPARAM key) {
         showShadow_ = !showShadow_;
     } else if (key == 'M') {
         system_.setCollisionMergingEnabled(!system_.collisionMergingEnabled());
-    } else if (key == 'E') {
+    } else if (key == 'E' && system_.scenario() != Scenario::ProceduralUniverse) {
         editMode_ = !editMode_;
         if (editMode_) {
             paused_ = true;
@@ -354,6 +360,16 @@ void Application::resetScenario(Scenario scenario) {
     cameraDistance_ = system_.recommendedCameraDistance();
     simulationAccumulator_ = 0.0;
     focusIndex_ = -1;
+    if (scenario == Scenario::ProceduralUniverse) {
+        focusIndex_ = system_.spacecraftIndex();
+        autoOrbit_ = false;
+        autoTimeScale_ = false;
+        showParticles_ = false;
+        showShadow_ = false;
+        showGrid_ = true;
+        simulationSpeed_ = 0.18;
+        effectiveSimulationSpeed_ = simulationSpeed_;
+    }
 }
 
 void Application::resetCustomScenario() {
@@ -370,7 +386,13 @@ void Application::resetCustomScenario() {
 }
 
 void Application::update(double realDt) {
-    if (autoOrbit_ && !mouseDragging_ && !speedSliderDragging_ && !bodyDragging_) {
+    const bool explorationMode = system_.scenario() == Scenario::ProceduralUniverse;
+    if (explorationMode) {
+        focusIndex_ = system_.spacecraftIndex();
+        updateExplorerControls();
+    }
+
+    if (!explorationMode && autoOrbit_ && !mouseDragging_ && !speedSliderDragging_ && !bodyDragging_) {
         cameraYaw_ += realDt * 0.075;
     }
 
@@ -404,6 +426,40 @@ void Application::update(double realDt) {
     if (steps == 700) {
         simulationAccumulator_ = 0.0;
     }
+}
+
+void Application::updateExplorerControls() {
+    Vec3 eye{};
+    Vec3 right{};
+    Vec3 up{};
+    Vec3 forward{};
+    cameraFrame(eye, right, up, forward);
+
+    Vec3 thrust{};
+    if (keyDown('W')) {
+        thrust += forward;
+    }
+    if (keyDown('S')) {
+        thrust -= forward * 0.70;
+    }
+    if (keyDown('D')) {
+        thrust += right * 0.72;
+    }
+    if (keyDown('A')) {
+        thrust -= right * 0.72;
+    }
+    if (keyDown('E')) {
+        thrust += up * 0.58;
+    }
+    if (keyDown('Q')) {
+        thrust -= up * 0.58;
+    }
+
+    ExplorerControlState control;
+    control.thrustDirection = lengthSquared(thrust) > 1.0e-12 ? normalized(thrust) : Vec3{};
+    control.boost = keyDown(VK_SHIFT);
+    control.brake = keyDown(VK_CONTROL);
+    system_.setExplorerControlState(control);
 }
 
 void Application::render() {
