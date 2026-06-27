@@ -1,7 +1,54 @@
+# Build output
 bin/
+build/
+dist/
+
+# Compiled binaries
 *.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.a
+
+# Object files
 *.o
 *.obj
-*.ilk
-*.pdb
+*.s
+
+# Executable link files
+*.exe.manifest
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Visual Studio
+.vs/
+*.sdf
+*.suo
+*.user
+*.vcxproj.*
+Debug/
+Release/
+x64/
+Win32/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# Config - user's custom initialization file (not the example)
+phyzbox.ini
+!phyzbox.ini.example
+
+# Exports
+exports/
+snapshots/
+
+# Logs
+*.log
 

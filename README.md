@@ -1,6 +1,21 @@
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
+  <img src="https://img.shields.io/badge/language-C++20-%23f34b7d.svg" alt="C++20">
+  <img src="https://img.shields.io/badge/platform-Windows%20(Win32)-0078d7.svg" alt="Platform: Windows">
+  <img src="https://img.shields.io/badge/GPU-OpenGL%20(fixed--pipeline)-5586a4.svg" alt="OpenGL">
+  <img src="https://img.shields.io/badge/build-MinGW%20g++-yellow.svg" alt="MinGW g++">
+  <img src="https://img.shields.io/badge/dependencies-none-brightgreen.svg" alt="Zero Dependencies">
+</p>
+
 # PhyzBox
 
-一个纯 C++ / Win32 / OpenGL 的 3D 三体天体运动演示项目。默认场景是非共面的混沌三体，三个天体的位置和轨迹全部由实时万有引力积分得到，不是预制动画。
+**PhyzBox** is a pure C++20 / Win32 / OpenGL 3D astrophysics sandbox simulator. It implements real-time N-body gravitational integration with a 4th-order Yoshida symplectic integrator, featuring black holes, tidal disruption, collision merging, gravity assists, and a procedurally-generated explorable universe — all with zero external dependencies.
+
+> 🌌 *Three-body problem → Astrophysical sandbox — see [project history](CHANGELOG.md).*
+
+---
+
+一个纯 C++20 / Win32 / OpenGL 的 3D 天体物理沙盘模拟器。默认场景是非共面的混沌三体，三个天体的位置和轨迹全部由实时万有引力积分得到，不是预制动画。
 
 物理计算使用天文单位制：距离为 AU，质量为太阳质量，时间为年，引力常数为 `G = 4π² AU³ / (M☉·yr²)`。它不需要联网下载依赖，当前工作空间里用 MinGW `g++` 就能直接构建。
 
@@ -143,3 +158,22 @@ position = 1.15, -0.75, -0.25
 不同类型会自动估算真实半径、密度、温度、亮度和默认颜色。黑洞会使用史瓦西半径 `Rs = 2GM/c²`、事件视界吞噬、`ISCO = 3Rs` 参考内缘和吸积盘视觉；近黑洞引力使用 Paczynski-Wiita 伪牛顿势，能表现强场轨道进动和捕获趋势。它不是完整数值相对论求解器；真正完整 GR 需要求解动态时空度规和爱因斯坦场方程。这里实现的是适合实时交互的强场近似层。
 
 洛希极限会根据天体密度/质量比估算。行星、小天体或恒星进入强潮汐区时会触发 `tidal disruption` 事件，并被撕成测试粒子流；如果主天体是黑洞，碎片会增强吸积盘亮度。
+
+---
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+- 🐛 **Report bugs** via [GitHub Issues](../../issues)
+- 💡 **Suggest features** via [Feature Requests](../../issues/new?template=feature_request.md)
+- 📖 **Improve docs** — typos, English translations, new preset scenarios
+- 🛠 **Submit PRs** — see the [PR checklist](CONTRIBUTING.md#pull-request-checklist)
+
+## License
+
+[MIT](LICENSE) © 2026 hydarealman
+
+---
+
+*PhyzBox — Where gravity is the only dependency.*
