@@ -1,15 +1,79 @@
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/language-C++20-%23f34b7d.svg" alt="C++20">
-  <img src="https://img.shields.io/badge/platform-Windows%20(Win32)-0078d7.svg" alt="Platform: Windows">
-  <img src="https://img.shields.io/badge/GPU-OpenGL%20(fixed--pipeline)-5586a4.svg" alt="OpenGL">
-  <img src="https://img.shields.io/badge/build-MinGW%20g++-yellow.svg" alt="MinGW g++">
-  <img src="https://img.shields.io/badge/dependencies-none-brightgreen.svg" alt="Zero Dependencies">
+  <img src="https://img.shields.io/badge/Godot-4.6-478cbf.svg" alt="Godot 4.6">
+  <img src="https://img.shields.io/badge/platform-Windows-0078d7.svg" alt="Platform: Windows">
+  <img src="https://img.shields.io/badge/physics-libphyz-brightgreen.svg" alt="libphyz physics">
 </p>
 
-# PhyzBox
+# PhyzBox：余烬航线
 
-**PhyzBox** is a pure C++20 / Win32 / OpenGL 3D astrophysics sandbox simulator. It implements real-time N-body gravitational integration with a 4th-order Yoshida symplectic integrator, featuring black holes, tidal disruption, collision merging, gravity assists, and a procedurally-generated explorable universe — all with zero external dependencies.
+一款由真实轨道力学驱动的单人任务游戏。你是太阳系边缘最后一名引力操作员，需要在有限推进剂下规划机动节点、预判黄色轨迹，并把飞船送过五个越来越危险的天体任务。
+
+![余烬航线驾驶舱](docs/images/ember-route-cockpit.png)
+
+游戏不是按预设路径播放动画：天体位置、引力弹弓、交会距离和任务结果全部由 C++20 `libphyz` 双精度 N-body 引擎实时计算。Godot 负责驾驶舱、剧情、镜头和反馈，旧版 Win32/OpenGL 程序作为科学实验室保留。
+
+## 立即游玩
+
+已经构建发布包时，直接运行：
+
+```powershell
+.\dist\PhyzBox.exe
+```
+
+首次从源码构建：
+
+```powershell
+.\scripts\bootstrap_godot.ps1
+.\scripts\build_all.ps1 -GodotTarget template_release -Jobs 4
+.\scripts\run_game.ps1
+```
+
+Windows 游戏生成在 `dist/PhyzBox.exe`。物理库使用者参阅 [libphyz/README.md](libphyz/README.md)，游戏开发说明参阅 [godot/README.md](godot/README.md)，完整实施与验收记录见 [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md)。
+
+## 怎么玩
+
+每一关都遵循同一个清晰的轨道工程闭环：
+
+1. 阅读任务简报，认清青色的“你的飞船”、洋红色的“任务目标”和金色主天体。
+2. 输入三轴 `Δv` 和机动发生时刻；不熟悉轨道力学时可点“导航建议”取得一组经过测试、但仍需亲自执行的参数。
+3. 点“预测轨迹”，观察黄色未来轨迹是否接近目标。
+4. 点“提交节点”，再点“运行”；求解器会精确推进至节点并施加脉冲。
+5. 通过实时任务指标判断是否需要暂停、修正或重新开始。成功后会解锁下一关并保存最佳成绩。
+
+常用操作：
+
+- 鼠标拖动画面空白处：绕系统旋转镜头
+- 鼠标滚轮：缩放
+- `Space`：暂停 / 继续
+- `F`：聚焦飞船
+- `T`：聚焦任务目标
+- `H`：查看整个系统
+- 左侧按钮：预测、提交/取消节点、立即点火、单步推进、改变时间倍率、保存/载入
+
+## 三章五关
+
+| 章节 | 任务 | 核心玩法 |
+|---|---|---|
+| 第一章·火种离港 | 离港窗口、静默信标 | 转移轨道与精确交会 |
+| 第二章·巨人的回声 | 借光而行、苍穹偏转 | 引力弹弓与小行星偏转 |
+| 第三章·三阳尽头 | 最后的观测者 | 在混沌三体系统中生存 |
+
+章节剧情、教程、失败复盘、解锁进度与最佳分数都会本地保存。五关均通过自动导航解实测，不存在必须碰运气的“假任务”。
+
+## 项目架构
+
+```text
+libphyz（C++20 双精度权威状态）
+├─ Godot GDExtension → 余烬航线：任务、剧情、驾驶舱与渲染
+├─ Win32/OpenGL      → 科学实验室与自由沙盘
+└─ tests/examples    → 算法回归、守恒量与确定性验证
+```
+
+> 🌌 从混沌三体实验室发展为可玩的轨道工程游戏，完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 科学实验室
 
 > 🌌 *Three-body problem → Astrophysical sandbox — see [project history](CHANGELOG.md).*
 
@@ -62,7 +126,7 @@ g++ -std=c++20 -O2 -Wall -Wextra -pedantic src\*.cpp -o bin\PhyzBox.exe -lopengl
 - `3`：倾斜平面的 3D 拉格朗日三角三体
 - `4`：双星 + 第三天体的层级系统
 - `5`：飞行器借巨行星引力弹弓加速的演示场景
-- `6`：程序化宇宙探索模式，生成数百个星球并驾驶玩家飞船巡航
+- `6`：自洽行星系统，所有恒星、行星和飞船都由同一个 N-body 核心推进
 - `+` / `-`：加快 / 减慢基准模拟速度
 - 拖动画面左上角的 `Base speed` 滑条：连续调节基准模拟速度
 - `A`：开启 / 关闭自动时间倍率
@@ -84,7 +148,7 @@ g++ -std=c++20 -O2 -Wall -Wextra -pedantic src\*.cpp -o bin\PhyzBox.exe -lopengl
 - `A` / `D`：左 / 右平移
 - `Q` / `E`：下 / 上平移
 - `Shift`：加力推进
-- `Ctrl`：阻尼刹车
+- `Ctrl`：逆速度方向的有限推力制动（不是空气阻尼）
 
 ## 实现概览
 
@@ -95,11 +159,11 @@ g++ -std=c++20 -O2 -Wall -Wextra -pedantic src\*.cpp -o bin\PhyzBox.exe -lopengl
 - Win32 窗口与输入：`src/Application.*`
 - 开发日志与疑难记录：`DEVELOPMENT_LOG.md`
 
-积分器使用四阶 Yoshida 辛积分，并在近距离交会时自动细分步长；这比朴素欧拉或普通二阶 Verlet 更适合长时间天体轨道演示。引力计算带很小的有限恒星半径级软化项，避免点质量奇点导致数值爆炸。混沌场景不会闭合成稳定轨道，微小初始差异会在数值积分中迅速放大，这就是三体问题最迷人的部分。
+积分器使用四阶 Yoshida 辛积分，并在近距离交会时自动细分步长；这比朴素欧拉或普通二阶 Verlet 更适合长时间天体轨道演示。引力计算带很小的软化项，避免点质量奇点导致数值爆炸。每一对有质量天体使用对称的成对力更新，因此牛顿引力和 Paczynski-Wiita 强场近似都保持线动量守恒；势能诊断与实际采用的力模型一致。混沌场景不会闭合成稳定轨道，微小初始差异会在数值积分中迅速放大，这就是三体问题最迷人的部分。
 
 默认开启自动时间倍率：天体距离较远时稍微加快，近距离飞掠时自动慢下来，方便观察关键交会。`+` / `-` 调整的是基准倍率，HUD 会同时显示实际倍率和基准倍率。
 
-HUD 中的能量漂移、角动量漂移、最近距离、系统状态、混沌发散度、合并次数和事件日志都来自实时计算，可用于判断模拟是否仍然守恒得足够好。屏幕上的球体半径为了可视化被放大了，不代表真实恒星半径。
+HUD 会明确显示积分器、活动 N-body 数量、时间步、能量漂移、角动量漂移、线动量残差、最近距离、系统状态和事件日志。屏幕上的球体半径只是显示半径；碰撞、洛希极限、逃逸速度等计算使用独立的真实物理半径。
 
 物理与可视化增强：
 
@@ -110,9 +174,16 @@ HUD 中的能量漂移、角动量漂移、最近距离、系统状态、混沌�
 - 编辑模式：`E` 进入后可直接拖动天体重新设置初始条件。
 - 天体自转：每个球体都有自转轴、周期和实时推进的自转角，表面经纬线会随时间转动。
 - 飞行器/引力弹弓：`spacecraft` 类型会作为低质量真实受力体积分，靠运动行星的引力飞掠自然改变速度，HUD 会显示飞行器速度、速度增益和最近飞掠距离。
-- 程序化宇宙探索：`6` 号场景会用固定 seed 生成一颗主恒星、约 220 个星球和玩家飞船。星球按解析轨道公转；飞船每帧的加速度由自主推进和主恒星/全部星球的引力矢量和共同决定，即 `a = a_engine + Σ GM_i r_i / |r_i|^3`。HUD 会显示最近星球、综合引力、逃逸速度和飞船速度。
+- 自洽行星系统：`6` 号场景用固定 seed 生成一颗主恒星、32 个不同质量/偏心率/倾角的天体和一艘低质量飞船。初始状态来自轨道力学，但之后不再回写解析轨道；全部天体参加同一套成对引力计算，扰动、进动、散射和碰撞都由状态自然演化。飞船操控只增加有限外力，没有速度上限、真空阻尼、视觉球体反弹或位置吸附。
 
-探索模式目前是太空飞行垂直切片：可以飞向不同星球、进入它们的重力井、低空擦掠并感受不同质量/距离带来的加速度变化。真正的地表地形分块、降落后行走、资源和生态系统还没有接入。
+飞船靠近行星时，状态和事件使用物理接触距离及 Hill 球，而不是为了渲染而放大的球体尺寸。当前模型仍未包含大气、地形、刚体姿态、燃料和完整广义相对论；这些不会被伪装成预设好的游戏规则。
+
+### 引擎设计参考
+
+- [REBOUND](https://rebound.hanno-rein.de/)：N-body 状态由积分器推进，并针对长周期系统、近距离交会选择不同积分策略。
+- [REBOUNDx](https://reboundx.readthedocs.io/en/latest/)：把广义相对论、潮汐等额外物理作为可组合效应加入，而不是写成场景动画。
+- [Orekit numerical propagation](https://www.orekit.org/static/apidocs/org/orekit/propagation/numerical/NumericalPropagator.html)：区分状态、数值积分和可组合力模型。
+- [NASA GMAT propagator](https://documentation.help/GMAT/Propagator.html)：由积分器与 ForceModel 共同传播轨道状态。
 
 ## 自定义初始条件
 

@@ -41,13 +41,6 @@ struct Body {
     Vec3 spinAxis{0.0, 0.0, 1.0};
     double rotationPeriod = 0.08;
     double rotationAngle = 0.0;
-    bool proceduralOrbit = false;
-    double orbitRadius = 0.0;
-    double orbitPhase = 0.0;
-    double orbitAngularSpeed = 0.0;
-    double orbitInclination = 0.0;
-    double orbitAscendingNode = 0.0;
-    double atmosphereRadius = 0.0;
     bool disrupted = false;
     Color color{};
     Vec3 position{};
@@ -92,6 +85,8 @@ public:
     [[nodiscard]] double time() const { return elapsedTime_; }
     [[nodiscard]] double totalEnergy() const;
     [[nodiscard]] double energyDrift() const;
+    [[nodiscard]] Vec3 totalLinearMomentum() const;
+    [[nodiscard]] double linearMomentumError() const;
     [[nodiscard]] Vec3 totalAngularMomentum() const;
     [[nodiscard]] double angularMomentumDrift() const;
     [[nodiscard]] double minSeparation() const;
@@ -111,6 +106,7 @@ public:
     [[nodiscard]] double softeningLength() const { return softening_; }
     [[nodiscard]] double recommendedTimeStep() const { return recommendedTimeStep_; }
     [[nodiscard]] double recommendedCameraDistance() const { return recommendedCameraDistance_; }
+    [[nodiscard]] const char* integratorName() const { return "Yoshida-4 symplectic"; }
     [[nodiscard]] int mergerCount() const { return mergerCount_; }
     [[nodiscard]] bool collisionMergingEnabled() const { return collisionMergingEnabled_; }
 
@@ -124,10 +120,9 @@ private:
     void integrateShadowYoshida4(double dt);
     void integrateShadowLeapfrog(double dt);
     void integrateTestParticles(double dt);
-    void stepProceduralUniverse(double dt);
+    void applyExplorerPropulsion(double dt);
     void generateProceduralUniverse();
-    void updateProceduralOrbits();
-    [[nodiscard]] Vec3 proceduralGravityAt(Vec3 position) const;
+    [[nodiscard]] double planetaryInfluenceRadius(std::size_t planetIndex) const;
     void detectExplorationEvents();
     void advanceRotations(double dt);
     [[nodiscard]] double adaptiveSubStep(double requestedDt) const;

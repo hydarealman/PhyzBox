@@ -809,44 +809,26 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     line.str("");
     line.clear();
     const bool explorationMode = system.scenario() == Scenario::ProceduralUniverse;
-    if (explorationMode) {
-        const int nearest = system.explorerNearestPlanetIndex();
-        const auto& bodies = system.bodies();
-        line << "worlds " << (bodies.size() >= 2 ? bodies.size() - 2 : 0);
-        if (nearest >= 0 && nearest < static_cast<int>(bodies.size())) {
-            line << " | nearest " << bodies[static_cast<std::size_t>(nearest)].name
-                 << " " << std::fixed << std::setprecision(2)
-                 << system.explorerNearestPlanetDistance() << " AU";
-        }
-    } else {
-        line << std::fixed << std::setprecision(6)
-             << "dt " << state.physicsDt << " yr"
-             << " | closest " << std::setprecision(3) << system.minSeparation() << " AU"
-             << " | softening " << std::setprecision(4) << system.softeningLength() << " AU";
-    }
+    line << system.integratorName()
+         << " | direct N-body N=" << system.bodies().size()
+         << " | dt " << std::scientific << std::setprecision(2) << state.physicsDt << " yr";
     drawText(34.0f, 114.0f, line.str(), {0.72f, 0.86f, 1.00f, 0.90f});
 
     line.str("");
     line.clear();
-    if (explorationMode) {
-        line << std::fixed << std::setprecision(2)
-             << "ship " << system.spacecraftSpeed() << " AU/yr"
-             << " | net gravity " << system.explorerLocalGravity() << " AU/yr^2"
-             << " | escape " << system.explorerEscapeSpeed() << " AU/yr";
-    } else {
-        line << std::fixed << std::setprecision(5)
-             << "energy drift " << (system.energyDrift() * 100.0) << "%"
-             << " | angular drift " << (system.angularMomentumDrift() * 100.0) << "%"
-             << " | fps " << std::setprecision(0) << state.fps;
-    }
+    line << std::scientific << std::setprecision(2)
+         << "dE " << (system.energyDrift() * 100.0) << "%"
+         << " | dL " << (system.angularMomentumDrift() * 100.0) << "%"
+         << " | P " << system.linearMomentumError()
+         << " | " << std::fixed << std::setprecision(0) << state.fps << " fps";
     drawText(34.0f, 138.0f, line.str(), {0.93f, 0.80f, 0.60f, 0.92f});
 
     line.str("");
     line.clear();
     if (explorationMode) {
         line << "status " << system.systemStatus()
-             << " | fps " << std::fixed << std::setprecision(0) << state.fps
-             << " | thrust W/S A/D Q/E Shift Ctrl";
+             << " | closest " << std::scientific << std::setprecision(2) << system.minSeparation() << " AU"
+             << " | soft " << system.softeningLength() << " AU";
     } else {
         line << "status " << system.systemStatus()
              << " | chaos " << std::scientific << std::setprecision(2) << system.chaosDivergence() << " AU"
@@ -890,15 +872,15 @@ void Renderer::renderHud(const NBodySystem& system, const RenderState& state) {
     glVertex2f(knobX - knobWidth * 0.5f, sliderY + sliderHeight + 5.0f);
     glEnd();
 
-    const bool hasSpacecraft = system.spacecraftSpeed() > 0.0 && !explorationMode;
+    const bool hasSpacecraft = system.spacecraftIndex() >= 0;
     const float controlsY = hasSpacecraft ? 262.0f : 238.0f;
     if (hasSpacecraft) {
         line.str("");
         line.clear();
         line << std::fixed << std::setprecision(2)
-             << "spacecraft " << system.spacecraftSpeed() << " AU/yr"
-             << " | gain " << (system.spacecraftSpeedGain() * 100.0) << "%"
-             << " | best flyby " << system.spacecraftNearestEncounterDistance() << " AU";
+             << "ship v " << system.spacecraftSpeed() << " AU/yr"
+             << " | |g| " << system.explorerLocalGravity() << " AU/yr^2"
+             << " | nearest " << system.explorerNearestPlanetDistance() << " AU";
         drawText(34.0f, 238.0f, line.str(), {0.55f, 0.96f, 1.00f, 0.92f});
     }
 

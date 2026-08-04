@@ -29,11 +29,13 @@ int runSelfTest() {
         const double dt = system.recommendedTimeStep();
         double maxAbsDrift = 0.0;
         double maxAbsAngularDrift = 0.0;
+        double maxLinearMomentumError = 0.0;
         double closestPair = std::numeric_limits<double>::infinity();
         for (int i = 0; i < 20000; ++i) {
             system.step(dt);
             maxAbsDrift = std::max(maxAbsDrift, std::abs(system.energyDrift()));
             maxAbsAngularDrift = std::max(maxAbsAngularDrift, std::abs(system.angularMomentumDrift()));
+            maxLinearMomentumError = std::max(maxLinearMomentumError, system.linearMomentumError());
             closestPair = std::min(closestPair, system.minSeparation());
         }
 
@@ -41,10 +43,12 @@ int runSelfTest() {
                   << " | simulated time " << system.time()
                   << " yr | closest " << closestPair
                   << " AU | max energy drift " << (maxAbsDrift * 100.0)
-                  << "% | max angular drift " << (maxAbsAngularDrift * 100.0) << "%\n";
+                  << "% | max angular drift " << (maxAbsAngularDrift * 100.0)
+                  << "% | momentum residual " << maxLinearMomentumError << "\n";
 
         if (!std::isfinite(maxAbsDrift) || maxAbsDrift > 5.0e-4 ||
-            !std::isfinite(maxAbsAngularDrift) || maxAbsAngularDrift > 1.0e-8) {
+            !std::isfinite(maxAbsAngularDrift) || maxAbsAngularDrift > 1.0e-8 ||
+            !std::isfinite(maxLinearMomentumError) || maxLinearMomentumError > 1.0e-10) {
             ok = false;
         }
     }
@@ -95,24 +99,45 @@ int runExplorerSelfTest() {
     phyz::NBodySystem system;
     system.reset(phyz::Scenario::ProceduralUniverse);
 
+    std::size_t dynamicallyAcceleratedBodies = 0;
+    for (const phyz::Body& body : system.bodies()) {
+        if (body.type != phyz::BodyType::Spacecraft && phyz::length(body.acceleration) > 1.0e-10) {
+            ++dynamicallyAcceleratedBodies;
+        }
+    }
+
+    double maxConservativeEnergyDrift = 0.0;
+    double maxMomentumResidual = 0.0;
+    const double dt = system.recommendedTimeStep();
+    for (int i = 0; i < 2500; ++i) {
+        system.step(dt);
+        maxConservativeEnergyDrift = std::max(maxConservativeEnergyDrift, std::abs(system.energyDrift()));
+        maxMomentumResidual = std::max(maxMomentumResidual, system.linearMomentumError());
+    }
+
     phyz::ExplorerControlState control;
     control.thrustDirection = phyz::normalized(phyz::Vec3{1.0, 0.25, 0.05});
     control.boost = true;
     system.setExplorerControlState(control);
 
-    const double dt = system.recommendedTimeStep();
     for (int i = 0; i < 2500; ++i) {
         system.step(dt);
     }
 
-    const bool ok = system.bodies().size() >= 200 &&
+    const bool ok = system.bodies().size() >= 24 &&
+        dynamicallyAcceleratedBodies + 1 >= system.bodies().size() &&
         system.spacecraftIndex() >= 0 &&
         system.explorerNearestPlanetIndex() >= 0 &&
         std::isfinite(system.spacecraftSpeed()) &&
         std::isfinite(system.explorerLocalGravity()) &&
-        system.explorerNearestPlanetDistance() > 0.0;
+        system.explorerNearestPlanetDistance() > 0.0 &&
+        maxConservativeEnergyDrift < 1.0e-5 &&
+        maxMomentumResidual < 1.0e-10;
 
     std::cout << "Explorer mode | bodies " << system.bodies().size()
+              << " | live gravity bodies " << dynamicallyAcceleratedBodies
+              << " | max conservative energy drift " << (maxConservativeEnergyDrift * 100.0) << "%"
+              << " | momentum residual " << maxMomentumResidual
               << " | ship speed " << system.spacecraftSpeed()
               << " AU/yr | nearest planet distance "
               << system.explorerNearestPlanetDistance()

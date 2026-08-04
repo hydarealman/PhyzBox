@@ -1,0 +1,15 @@
+PhyzBox native regression baseline captured before libphyz migration.
+
+Command: bin\PhyzBox.exe --self-test
+
+Trisolaris chaotic system | simulated time 2.4 yr | closest 0.105038 AU | max energy drift 4.67064e-05% | max angular drift 2.84409e-12% | momentum residual 1.91463e-14
+Figure-eight choreography | simulated time 12.4 yr | closest 0.690504 AU | max energy drift 1.61598e-08% | max angular drift 1.26565e-11% | momentum residual 1.53299e-14
+Tilted Lagrange triangle | simulated time 11 yr | closest 2.2168 AU | max energy drift 1.88872e-12% | max angular drift 9.42764e-13% | momentum residual 1.61465e-14
+Binary star with wanderer | simulated time 8 yr | closest 0.84328 AU | max energy drift 1.77976e-09% | max angular drift 2.87184e-12% | momentum residual 1.4983e-14
+Gravity assist flyby | simulated time 0.9 yr | closest 0.150102 AU | max energy drift 6.06255e-12% | max angular drift 3.03707e-12% | momentum residual 1.29133e-14
+Self-test passed
+
+Command: bin\PhyzBox.exe --self-test-explorer
+
+Explorer mode | bodies 34 | live gravity bodies 33 | max conservative energy drift 1.93616e-11% | momentum residual 1.10193e-15 | ship speed 47.3212 AU/yr | nearest planet distance 3.18791 AU | net gravity 0.420226 AU/yr^2
+Explorer self-test passed

@@ -1,4 +1,5 @@
 #include "NBodySystem.hpp"
+#include "phyz/libphyz.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -36,22 +37,21 @@ int firstSpacecraftIndex(const std::vector<Body>& bodies) {
 }
 
 double defaultPhysicalRadius(BodyType type, double mass) {
-    const double safeMass = std::max(0.001, mass);
     switch (type) {
     case BodyType::BlackHole:
-        return schwarzschildRadius(safeMass);
+        return schwarzschildRadius(std::max(1.0e-12, mass));
     case BodyType::NeutronStar:
         return 8.0e-8;
     case BodyType::WhiteDwarf:
-        return 0.000045 * std::pow(safeMass, -1.0 / 3.0);
+        return 0.000045 * std::pow(std::max(0.05, mass), -1.0 / 3.0);
     case BodyType::Planet:
-        return 0.00042 * std::pow(safeMass / 0.001, 1.0 / 3.0);
+        return 0.00042 * std::pow(std::max(1.0e-12, mass) / 0.001, 1.0 / 3.0);
     case BodyType::MinorBody:
-        return 0.000035 * std::pow(safeMass / 1.0e-6, 1.0 / 3.0);
+        return 0.000035 * std::pow(std::max(1.0e-18, mass) / 1.0e-6, 1.0 / 3.0);
     case BodyType::Spacecraft:
         return 8.0e-8;
     case BodyType::Star:
-        return SolarRadiusAu * std::pow(safeMass, 0.8);
+        return SolarRadiusAu * std::pow(std::max(0.001, mass), 0.8);
     }
     return SolarRadiusAu;
 }
@@ -230,24 +230,6 @@ Vec3 rotateOrbitPlane(Vec3 value, double inclination, double ascendingNode) {
     };
 }
 
-Vec3 orbitPosition(const Body& body, double time) {
-    const double phase = body.orbitPhase + body.orbitAngularSpeed * time;
-    return rotateOrbitPlane(
-        {body.orbitRadius * std::cos(phase), body.orbitRadius * std::sin(phase), 0.0},
-        body.orbitInclination,
-        body.orbitAscendingNode);
-}
-
-Vec3 orbitVelocity(const Body& body, double time) {
-    const double phase = body.orbitPhase + body.orbitAngularSpeed * time;
-    return rotateOrbitPlane(
-        {-body.orbitRadius * body.orbitAngularSpeed * std::sin(phase),
-         body.orbitRadius * body.orbitAngularSpeed * std::cos(phase),
-         0.0},
-        body.orbitInclination,
-        body.orbitAscendingNode);
-}
-
 Color paletteColor(std::size_t index) {
     constexpr Color palette[] = {
         {1.00f, 0.38f, 0.22f, 1.0f},
@@ -345,6 +327,51 @@ Vec3 accelerationContribution(const Body& source, const Vec3& delta, double soft
     const double inverseDistance = 1.0 / std::sqrt(softenedDistanceSquared);
     const double inverseDistanceCubed = inverseDistance * inverseDistance * inverseDistance;
     return delta * (gravitationalConstant * source.mass * inverseDistanceCubed);
+}
+
+engine::Vec3d toEngine(Vec3 value) {
+    return {value.x, value.y, value.z};
+}
+
+Vec3 fromEngine(engine::Vec3d value) {
+    return {value.x, value.y, value.z};
+}
+
+std::vector<engine::BodyState> makeEngineStates(const std::vector<Body>& bodies) {
+    std::vector<engine::BodyState> states;
+    states.reserve(bodies.size());
+    for (std::size_t i = 0; i < bodies.size(); ++i) {
+        const Body& body = bodies[i];
+        states.push_back({
+            engine::BodyId{static_cast<std::uint64_t>(i + 1)},
+            body.mass,
+            body.mass,
+            body.physicalRadius,
+            body.schwarzschildRadius,
+            toEngine(body.position),
+            toEngine(body.velocity),
+            toEngine(body.acceleration),
+        });
+    }
+    return states;
+}
+
+engine::ForcePipeline makeEngineForces(double gravitationalConstant, double softening) {
+    engine::ForcePipeline forces;
+    forces.add<engine::PairwiseGravity>(
+        gravitationalConstant,
+        engine::GravityLaw::PaczynskiWiita,
+        softening);
+    return forces;
+}
+
+void copyEngineState(const std::vector<engine::BodyState>& states, std::vector<Body>& bodies) {
+    const std::size_t count = std::min(states.size(), bodies.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        bodies[i].position = fromEngine(states[i].position);
+        bodies[i].velocity = fromEngine(states[i].velocity);
+        bodies[i].acceleration = fromEngine(states[i].acceleration);
+    }
 }
 
 } // namespace
@@ -556,17 +583,16 @@ void NBodySystem::reset(Scenario scenario) {
 
     case Scenario::ProceduralUniverse:
         generateProceduralUniverse();
+        normalizeCenterOfMass();
         calculateAccelerations(accelerations_);
         for (std::size_t i = 0; i < bodies_.size(); ++i) {
-            bodies_[i].acceleration = i == static_cast<std::size_t>(firstSpacecraftIndex(bodies_))
-                ? proceduralGravityAt(bodies_[i].position)
-                : Vec3{};
+            bodies_[i].acceleration = accelerations_[i];
         }
         rebaselineDiagnostics();
         seedTrails();
         shadowBodies_.clear();
         testParticles_.clear();
-        pushEvent("procedural universe generated: 220 planets", {0.62f, 0.86f, 1.00f, 1.0f});
+        pushEvent("self-consistent N-body planetary system initialized", {0.62f, 0.86f, 1.00f, 1.0f});
         return;
     }
 
@@ -595,8 +621,10 @@ void NBodySystem::reset(const InitialConditionConfig& config) {
     mergerCount_ = 0;
     lastCloseEventTime_ = -1.0e9;
     lastAssistEventTime_ = -1.0e9;
+    lastExplorationEventTime_ = -1.0e9;
     initialSpacecraftSpeed_ = 0.0;
     spacecraftNearestEncounterDistance_ = std::numeric_limits<double>::infinity();
+    explorerControl_ = {};
     elapsedTime_ = 0.0;
     trailTimer_ = 0.0;
 
@@ -715,7 +743,7 @@ const char* NBodySystem::scenarioName() const {
     case Scenario::GravityAssist:
         return "Gravity assist flyby";
     case Scenario::ProceduralUniverse:
-        return "Procedural universe explorer";
+        return "Self-consistent planetary system";
     case Scenario::Custom:
         return "Custom initial conditions";
     }
@@ -726,25 +754,28 @@ void NBodySystem::step(double dt) {
     if (bodies_.empty()) {
         return;
     }
-    if (scenario_ == Scenario::ProceduralUniverse) {
-        stepProceduralUniverse(dt);
-        return;
-    }
-
     double remaining = std::abs(dt);
     const double direction = dt >= 0.0 ? 1.0 : -1.0;
     int subSteps = 0;
 
     while (remaining > 1.0e-14 && subSteps < 1024) {
         const double subStep = std::min(remaining, adaptiveSubStep(remaining));
+        if (scenario_ == Scenario::ProceduralUniverse) {
+            applyExplorerPropulsion(direction * subStep * 0.5);
+        }
         integrateYoshida4(direction * subStep);
-        integrateShadowYoshida4(direction * subStep);
-        integrateTestParticles(direction * subStep);
+        if (scenario_ == Scenario::ProceduralUniverse) {
+            applyExplorerPropulsion(direction * subStep * 0.5);
+        } else {
+            integrateShadowYoshida4(direction * subStep);
+            integrateTestParticles(direction * subStep);
+        }
         advanceRotations(direction * subStep);
         remaining -= subStep;
         elapsedTime_ += direction * subStep;
         detectCloseEncounters();
         detectGravityAssist();
+        detectExplorationEvents();
         resolveBlackHoleCaptures();
         detectRocheEvents();
         if (collisionMergingEnabled_) {
@@ -755,13 +786,21 @@ void NBodySystem::step(double dt) {
     }
 
     if (remaining > 1.0e-14) {
+        if (scenario_ == Scenario::ProceduralUniverse) {
+            applyExplorerPropulsion(direction * remaining * 0.5);
+        }
         integrateYoshida4(direction * remaining);
-        integrateShadowYoshida4(direction * remaining);
-        integrateTestParticles(direction * remaining);
+        if (scenario_ == Scenario::ProceduralUniverse) {
+            applyExplorerPropulsion(direction * remaining * 0.5);
+        } else {
+            integrateShadowYoshida4(direction * remaining);
+            integrateTestParticles(direction * remaining);
+        }
         advanceRotations(direction * remaining);
         elapsedTime_ += direction * remaining;
         detectCloseEncounters();
         detectGravityAssist();
+        detectExplorationEvents();
         resolveBlackHoleCaptures();
         detectRocheEvents();
         if (collisionMergingEnabled_) {
@@ -845,22 +884,10 @@ void NBodySystem::seedTestParticles(int count) {
 }
 
 double NBodySystem::totalEnergy() const {
-    double kinetic = 0.0;
-    double potential = 0.0;
-
-    for (const Body& body : bodies_) {
-        kinetic += 0.5 * body.mass * lengthSquared(body.velocity);
-    }
-
-    for (std::size_t i = 0; i < bodies_.size(); ++i) {
-        for (std::size_t j = i + 1; j < bodies_.size(); ++j) {
-            const Vec3 delta = bodies_[j].position - bodies_[i].position;
-            const double distance = std::sqrt(lengthSquared(delta) + softening_ * softening_);
-            potential -= gravitationalConstant_ * bodies_[i].mass * bodies_[j].mass / distance;
-        }
-    }
-
-    return kinetic + potential;
+    const std::vector<engine::BodyState> states = makeEngineStates(bodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    const engine::InvariantReport report = engine::calculate_invariants(states, forces, elapsedTime_);
+    return report.mechanicalEnergy.value_or(report.kineticEnergy);
 }
 
 double NBodySystem::energyDrift() const {
@@ -868,6 +895,18 @@ double NBodySystem::energyDrift() const {
         return 0.0;
     }
     return (totalEnergy() - initialEnergy_) / std::abs(initialEnergy_);
+}
+
+Vec3 NBodySystem::totalLinearMomentum() const {
+    const std::vector<engine::BodyState> states = makeEngineStates(bodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    return fromEngine(engine::calculate_invariants(states, forces, elapsedTime_).linearMomentum);
+}
+
+double NBodySystem::linearMomentumError() const {
+    const std::vector<engine::BodyState> states = makeEngineStates(bodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    return engine::calculate_invariants(states, forces, elapsedTime_).momentumResidual;
 }
 
 double NBodySystem::totalMass() const {
@@ -891,11 +930,9 @@ Vec3 NBodySystem::centerOfMass() const {
 }
 
 Vec3 NBodySystem::totalAngularMomentum() const {
-    Vec3 result{};
-    for (const Body& body : bodies_) {
-        result += cross(body.position, body.velocity) * body.mass;
-    }
-    return result;
+    const std::vector<engine::BodyState> states = makeEngineStates(bodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    return fromEngine(engine::calculate_invariants(states, forces, elapsedTime_).angularMomentum);
 }
 
 double NBodySystem::angularMomentumDrift() const {
@@ -1008,7 +1045,7 @@ double NBodySystem::explorerLocalGravity() const {
     if (shipIndex < 0) {
         return 0.0;
     }
-    return length(proceduralGravityAt(bodies_[static_cast<std::size_t>(shipIndex)].position));
+    return length(accelerationAt(bodies_[static_cast<std::size_t>(shipIndex)].position));
 }
 
 double NBodySystem::explorerEscapeSpeed() const {
@@ -1019,7 +1056,7 @@ double NBodySystem::explorerEscapeSpeed() const {
     }
     const Body& ship = bodies_[static_cast<std::size_t>(shipIndex)];
     const Body& planet = bodies_[static_cast<std::size_t>(planetIndex)];
-    const double distance = std::max(planet.radius, length(planet.position - ship.position));
+    const double distance = std::max(planet.physicalRadius, length(planet.position - ship.position));
     return std::sqrt(2.0 * gravitationalConstant_ * planet.mass / distance);
 }
 
@@ -1049,14 +1086,17 @@ const char* NBodySystem::systemStatus() const {
         if (nearest >= 0) {
             const Body& body = bodies_[static_cast<std::size_t>(nearest)];
             const double distance = explorerNearestPlanetDistance();
-            if (distance < body.radius * 1.22) {
-                return "surface proximity";
+            const int ship = firstSpacecraftIndex(bodies_);
+            const double contactDistance = body.physicalRadius +
+                (ship >= 0 ? bodies_[static_cast<std::size_t>(ship)].physicalRadius : 0.0);
+            if (distance < contactDistance * 4.0) {
+                return "physical collision proximity";
             }
-            if (distance < body.atmosphereRadius) {
-                return "inside planetary gravity well";
+            if (distance < planetaryInfluenceRadius(static_cast<std::size_t>(nearest))) {
+                return "inside planetary Hill sphere";
             }
         }
-        return "deep space cruise";
+        return "multi-body free flight";
     }
     if (bodies_.size() <= 1) {
         return "single remnant";
@@ -1101,38 +1141,31 @@ void NBodySystem::calculateAccelerations(std::vector<Vec3>& output) const {
 }
 
 void NBodySystem::calculateAccelerationsFor(const std::vector<Body>& source, std::vector<Vec3>& output) const {
-    output.assign(source.size(), Vec3{});
-
-    for (std::size_t i = 0; i < source.size(); ++i) {
-        for (std::size_t j = i + 1; j < source.size(); ++j) {
-            const Vec3 delta = source[j].position - source[i].position;
-            output[i] += accelerationContribution(source[j], delta, softening_, gravitationalConstant_);
-            output[j] += accelerationContribution(source[i], -delta, softening_, gravitationalConstant_);
-        }
-    }
+    const std::vector<engine::BodyState> states = makeEngineStates(source);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    std::vector<engine::Vec3d> engineOutput(source.size());
+    forces.calculate(states, elapsedTime_, engineOutput);
+    output.resize(engineOutput.size());
+    std::transform(engineOutput.begin(), engineOutput.end(), output.begin(), fromEngine);
 }
 
 void NBodySystem::integrateYoshida4(double dt) {
-    const double cubeRootTwo = std::cbrt(2.0);
-    const double w1 = 1.0 / (2.0 - cubeRootTwo);
-    const double w0 = -cubeRootTwo / (2.0 - cubeRootTwo);
-
-    integrateLeapfrog(w1 * dt);
-    integrateLeapfrog(w0 * dt);
-    integrateLeapfrog(w1 * dt);
+    std::vector<engine::BodyState> states = makeEngineStates(bodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    engine::Yoshida4Fixed integrator;
+    const engine::StepResult result = integrator.step(states, forces, elapsedTime_, dt);
+    if (result.status == engine::StepStatus::Success) {
+        copyEngineState(states, bodies_);
+    }
 }
 
 void NBodySystem::integrateLeapfrog(double dt) {
-    calculateAccelerations(accelerations_);
-    for (std::size_t i = 0; i < bodies_.size(); ++i) {
-        bodies_[i].velocity += accelerations_[i] * (0.5 * dt);
-        bodies_[i].position += bodies_[i].velocity * dt;
-    }
-
-    calculateAccelerations(accelerations_);
-    for (std::size_t i = 0; i < bodies_.size(); ++i) {
-        bodies_[i].velocity += accelerations_[i] * (0.5 * dt);
-        bodies_[i].acceleration = accelerations_[i];
+    std::vector<engine::BodyState> states = makeEngineStates(bodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    engine::Leapfrog2Fixed integrator;
+    const engine::StepResult result = integrator.step(states, forces, elapsedTime_, dt);
+    if (result.status == engine::StepStatus::Success) {
+        copyEngineState(states, bodies_);
     }
 }
 
@@ -1141,26 +1174,22 @@ void NBodySystem::integrateShadowYoshida4(double dt) {
         return;
     }
 
-    const double cubeRootTwo = std::cbrt(2.0);
-    const double w1 = 1.0 / (2.0 - cubeRootTwo);
-    const double w0 = -cubeRootTwo / (2.0 - cubeRootTwo);
-
-    integrateShadowLeapfrog(w1 * dt);
-    integrateShadowLeapfrog(w0 * dt);
-    integrateShadowLeapfrog(w1 * dt);
+    std::vector<engine::BodyState> states = makeEngineStates(shadowBodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    engine::Yoshida4Fixed integrator;
+    const engine::StepResult result = integrator.step(states, forces, elapsedTime_, dt);
+    if (result.status == engine::StepStatus::Success) {
+        copyEngineState(states, shadowBodies_);
+    }
 }
 
 void NBodySystem::integrateShadowLeapfrog(double dt) {
-    calculateAccelerationsFor(shadowBodies_, shadowAccelerations_);
-    for (std::size_t i = 0; i < shadowBodies_.size(); ++i) {
-        shadowBodies_[i].velocity += shadowAccelerations_[i] * (0.5 * dt);
-        shadowBodies_[i].position += shadowBodies_[i].velocity * dt;
-    }
-
-    calculateAccelerationsFor(shadowBodies_, shadowAccelerations_);
-    for (std::size_t i = 0; i < shadowBodies_.size(); ++i) {
-        shadowBodies_[i].velocity += shadowAccelerations_[i] * (0.5 * dt);
-        shadowBodies_[i].acceleration = shadowAccelerations_[i];
+    std::vector<engine::BodyState> states = makeEngineStates(shadowBodies_);
+    const engine::ForcePipeline forces = makeEngineForces(gravitationalConstant_, softening_);
+    engine::Leapfrog2Fixed integrator;
+    const engine::StepResult result = integrator.step(states, forces, elapsedTime_, dt);
+    if (result.status == engine::StepStatus::Success) {
+        copyEngineState(states, shadowBodies_);
     }
 }
 
@@ -1174,57 +1203,27 @@ void NBodySystem::integrateTestParticles(double dt) {
     }
 }
 
-void NBodySystem::stepProceduralUniverse(double dt) {
-    elapsedTime_ += dt;
-    updateProceduralOrbits();
-
+void NBodySystem::applyExplorerPropulsion(double dt) {
     const int shipIndex = firstSpacecraftIndex(bodies_);
-    if (shipIndex >= 0) {
-        Body& ship = bodies_[static_cast<std::size_t>(shipIndex)];
-        Vec3 thrust = explorerControl_.thrustDirection;
-        if (lengthSquared(thrust) > 1.0) {
-            thrust = normalized(thrust);
-        }
-
-        const double thrustAcceleration = explorerControl_.boost ? 96.0 : 34.0;
-        const Vec3 gravity = proceduralGravityAt(ship.position);
-        ship.acceleration = gravity + thrust * thrustAcceleration;
-        ship.velocity += ship.acceleration * dt;
-
-        if (explorerControl_.brake) {
-            ship.velocity *= std::exp(-18.0 * dt);
-        }
-
-        const double maxSpeed = explorerControl_.boost ? 120.0 : 72.0;
-        const double speed = length(ship.velocity);
-        if (speed > maxSpeed) {
-            ship.velocity = normalized(ship.velocity) * maxSpeed;
-        }
-
-        ship.position += ship.velocity * dt;
-
-        const int nearestPlanet = explorerNearestPlanetIndex();
-        if (nearestPlanet >= 0) {
-            const Body& planet = bodies_[static_cast<std::size_t>(nearestPlanet)];
-            const Vec3 offset = ship.position - planet.position;
-            const double distance = length(offset);
-            const double surface = planet.radius * 1.08;
-            if (distance > 1.0e-9 && distance < surface) {
-                const Vec3 normal = offset / distance;
-                const Vec3 relativeVelocity = ship.velocity - planet.velocity;
-                const double inwardSpeed = dot(relativeVelocity, normal);
-                ship.position = planet.position + normal * surface;
-                if (inwardSpeed < 0.0) {
-                    ship.velocity -= normal * (inwardSpeed * 1.15);
-                    ship.velocity *= 0.86;
-                }
-            }
-        }
+    if (shipIndex < 0 || dt == 0.0) {
+        return;
     }
 
-    advanceRotations(dt);
-    detectExplorationEvents();
-    captureTrail(std::abs(dt));
+    Body& ship = bodies_[static_cast<std::size_t>(shipIndex)];
+    Vec3 commandedDirection = explorerControl_.thrustDirection;
+    if (lengthSquared(commandedDirection) > 1.0) {
+        commandedDirection = normalized(commandedDirection);
+    }
+
+    // Control input is modeled as finite spacecraft acceleration. "Brake" is a
+    // retrograde burn; there is no drag, damping, speed cap, or surface bounce.
+    const double mainEngineAcceleration = explorerControl_.boost ? 96.0 : 34.0;
+    Vec3 propulsion = commandedDirection * mainEngineAcceleration;
+    if (explorerControl_.brake && lengthSquared(ship.velocity) > 1.0e-18) {
+        propulsion -= normalized(ship.velocity) * 34.0;
+    }
+    ship.velocity += propulsion * dt;
+    ship.acceleration += propulsion;
 }
 
 void NBodySystem::generateProceduralUniverse() {
@@ -1233,15 +1232,15 @@ void NBodySystem::generateProceduralUniverse() {
     testParticles_.clear();
     events_.clear();
     gravitationalConstant_ = AstronomicalG;
-    softening_ = 0.035;
-    recommendedTimeStep_ = 0.00018;
+    softening_ = 2.0e-5;
+    recommendedTimeStep_ = 0.00020;
     recommendedCameraDistance_ = 3.4;
 
     Body star = makeBody(
         "Atlas Prime",
         BodyType::Star,
         1.35,
-        0.52,
+        0.22,
         0.0,
         {1.00f, 0.72f, 0.36f, 1.0f},
         {0.0, 0.0, 0.0},
@@ -1251,17 +1250,22 @@ void NBodySystem::generateProceduralUniverse() {
 
     std::mt19937 rng(1337);
     std::uniform_real_distribution<double> unit(0.0, 1.0);
-    constexpr int PlanetCount = 220;
+    // A compact but genuinely live system: every body below participates in
+    // the same pairwise force calculation. The logarithmic spacing and modest
+    // masses avoid manufacturing a visually dense but dynamically impossible
+    // 220-major-planet system.
+    constexpr int PlanetCount = 32;
     bodies_.reserve(PlanetCount + 2);
 
     for (int i = 0; i < PlanetCount; ++i) {
         const double t = static_cast<double>(i) / static_cast<double>(PlanetCount - 1);
-        const double jitter = (unit(rng) - 0.5) * 0.85;
-        const double orbitRadius = 4.2 + std::pow(t, 1.28) * 90.0 + jitter;
-        const double mass = 0.00010 + std::pow(unit(rng), 2.2) * 0.0095;
+        const double semiMajorAxis = 0.72 * std::pow(34.0 / 0.72, t);
+        const double eccentricity = 0.005 + unit(rng) * 0.045;
+        const double orbitRadius = semiMajorAxis * (1.0 - eccentricity);
+        const double mass = 3.0e-7 + std::pow(unit(rng), 2.2) * 2.8e-4;
         const double visualRadius = 0.055 + std::cbrt(mass / 0.001) * 0.052 + unit(rng) * 0.040;
-        const bool icy = i % 7 == 0 || orbitRadius > 62.0;
-        const bool hot = orbitRadius < 15.0 && i % 4 != 0;
+        const bool icy = i % 7 == 0 || orbitRadius > 12.0;
+        const bool hot = orbitRadius < 1.2 && i % 4 != 0;
         const bool ocean = !hot && !icy && i % 5 == 0;
         Color color = hot
             ? Color{0.96f, 0.44f, 0.22f, 1.0f}
@@ -1279,23 +1283,28 @@ void NBodySystem::generateProceduralUniverse() {
             i % 13 == 0 ? BodyType::MinorBody : BodyType::Planet,
             mass,
             visualRadius,
-            visualRadius * 0.22,
+            0.0,
             color,
             {},
             {});
-        planet.proceduralOrbit = true;
-        planet.orbitRadius = orbitRadius;
-        planet.orbitPhase = GoldenAngle * static_cast<double>(i) + unit(rng) * 0.25;
-        planet.orbitAngularSpeed = std::sqrt(gravitationalConstant_ * star.mass / (orbitRadius * orbitRadius * orbitRadius));
-        planet.orbitInclination = (unit(rng) - 0.5) * 0.34;
-        planet.orbitAscendingNode = unit(rng) * 2.0 * Pi;
-        planet.atmosphereRadius = planet.radius * (2.2 + unit(rng) * 1.4);
+        const double phase = GoldenAngle * static_cast<double>(i) + unit(rng) * 0.25;
+        const double inclination = (unit(rng) - 0.5) * 0.12;
+        const double ascendingNode = unit(rng) * 2.0 * Pi;
         planet.temperature = hot ? 740.0 : (icy ? 115.0 : (ocean ? 294.0 : 250.0 + unit(rng) * 170.0));
         planet.luminosity = 0.0;
         configureDefaultSpin(planet, static_cast<std::size_t>(i + 1));
         planet.rotationPeriod = 0.0014 + unit(rng) * 0.0085;
-        planet.position = orbitPosition(planet, 0.0);
-        planet.velocity = orbitVelocity(planet, 0.0);
+        planet.position = rotateOrbitPlane(
+            {orbitRadius * std::cos(phase), orbitRadius * std::sin(phase), 0.0},
+            inclination,
+            ascendingNode);
+        const double periapsisSpeed = std::sqrt(
+            gravitationalConstant_ * (star.mass + planet.mass) * (1.0 + eccentricity) /
+            (semiMajorAxis * (1.0 - eccentricity)));
+        planet.velocity = rotateOrbitPlane(
+            {-periapsisSpeed * std::sin(phase), periapsisSpeed * std::cos(phase), 0.0},
+            inclination,
+            ascendingNode);
         planet.trail.clear();
         bodies_.push_back(planet);
     }
@@ -1307,43 +1316,33 @@ void NBodySystem::generateProceduralUniverse() {
         0.090,
         8.0e-8,
         {0.94f, 0.98f, 1.00f, 1.0f},
-        {3.1, -2.4, 0.35},
-        {1.5, 8.4, 0.0});
+        {1.08, -0.14, 0.04},
+        {0.85, 7.10, 0.08});
     ship.rotationPeriod = 0.0006;
     ship.trail.clear();
     ship.trail.push_back(ship.position);
     bodies_.push_back(ship);
 }
 
-void NBodySystem::updateProceduralOrbits() {
-    for (Body& body : bodies_) {
-        if (!body.proceduralOrbit) {
-            continue;
-        }
-        body.position = orbitPosition(body, elapsedTime_);
-        body.velocity = orbitVelocity(body, elapsedTime_);
-        body.acceleration = {};
+double NBodySystem::planetaryInfluenceRadius(std::size_t planetIndex) const {
+    if (planetIndex >= bodies_.size()) {
+        return 0.0;
     }
-}
 
-Vec3 NBodySystem::proceduralGravityAt(Vec3 position) const {
-    Vec3 result{};
+    const Body& planet = bodies_[planetIndex];
+    const Body* primary = nullptr;
     for (const Body& body : bodies_) {
-        if (body.type == BodyType::Spacecraft || body.mass <= 0.0) {
-            continue;
+        if (body.type == BodyType::Star && (&body != &planet) &&
+            (primary == nullptr || body.mass > primary->mass)) {
+            primary = &body;
         }
-        const Vec3 delta = body.position - position;
-        const double distanceSquared = lengthSquared(delta);
-        if (distanceSquared <= 1.0e-14) {
-            continue;
-        }
-        const double softening = std::max(0.030, body.radius * 0.62);
-        const double softened = distanceSquared + softening * softening;
-        const double inverseDistance = 1.0 / std::sqrt(softened);
-        const double inverseDistanceCubed = inverseDistance * inverseDistance * inverseDistance;
-        result += delta * (gravitationalConstant_ * body.mass * inverseDistanceCubed);
     }
-    return result;
+    if (primary == nullptr || primary->mass <= 0.0 || planet.mass <= 0.0) {
+        return 0.0;
+    }
+
+    const double orbitalRadius = length(planet.position - primary->position);
+    return orbitalRadius * std::cbrt(planet.mass / (3.0 * primary->mass));
 }
 
 void NBodySystem::advanceRotations(double dt) {
@@ -1493,14 +1492,17 @@ void NBodySystem::detectExplorationEvents() {
 
     const Body& planet = bodies_[static_cast<std::size_t>(nearest)];
     const double distance = explorerNearestPlanetDistance();
-    if (distance < planet.radius * 1.28) {
+    const int ship = firstSpacecraftIndex(bodies_);
+    const double contactDistance = planet.physicalRadius +
+        (ship >= 0 ? bodies_[static_cast<std::size_t>(ship)].physicalRadius : 0.0);
+    if (distance < contactDistance * 4.0) {
         std::ostringstream message;
-        message << "surface skim: " << planet.name << " at " << distance << " AU";
+        message << "physical close approach: " << planet.name << " at " << distance << " AU";
         pushEvent(message.str(), {1.00f, 0.76f, 0.38f, 1.0f});
         lastExplorationEventTime_ = elapsedTime_;
-    } else if (distance < planet.atmosphereRadius) {
+    } else if (distance < planetaryInfluenceRadius(static_cast<std::size_t>(nearest))) {
         std::ostringstream message;
-        message << "gravity well entry: " << planet.name
+        message << "Hill sphere entry: " << planet.name
                 << " net gravity " << explorerLocalGravity() << " AU/yr^2";
         pushEvent(message.str(), {0.58f, 0.92f, 1.00f, 1.0f});
         lastExplorationEventTime_ = elapsedTime_;

@@ -1,7 +1,15 @@
 # Build output
 bin/
+.tools/
+godot/bin/
+godot/.godot/
 build/
 dist/
+.runtime/
+__pycache__/
+*.pyc
+.sconsign.dblite
+*.obj.import
 
 # Compiled binaries
 *.exe
@@ -51,4 +59,3 @@ snapshots/
 
 # Logs
 *.log
-
