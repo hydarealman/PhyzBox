@@ -9,9 +9,17 @@ const COLORS := [
 const PLAYER_COLOR := Color("65e6ff")
 const TARGET_COLOR := Color("ff70c8")
 const PRIMARY_COLOR := Color("ffc45e")
+const INK := Color("081018")
+const PANEL := Color(0.025, 0.045, 0.070, 0.88)
+const PANEL_SOLID := Color("0b1520")
+const TEXT_MAIN := Color("e7f4ff")
+const TEXT_MUTED := Color("7891a6")
+const ACCENT := Color("5ce1e6")
+const AMBER := Color("ffb454")
 const TIME_RATES := [0.25, 1.0, 4.0, 12.0, 30.0]
 const SAVE_PATH := "user://mission.snapshot"
 const PROGRESS_PATH := "user://campaign.cfg"
+const BRIEFING_SHADER = preload("res://shaders/briefing_space.gdshader")
 
 var simulation
 var current_mission := 0
@@ -20,6 +28,7 @@ var best_scores: Dictionary = {}
 var mission_finished := false
 
 var body_nodes: Dictionary = {}
+var body_visuals: Dictionary = {}
 var body_local_positions: Dictionary = {}
 var trails: Dictionary = {}
 var trail_meshes: Dictionary = {}
@@ -48,12 +57,17 @@ var orbit_label: Label
 var result_label: Label
 var time_button: Button
 var mission_picker: OptionButton
+var fuel_bar: ProgressBar
+var time_bar: ProgressBar
+var telemetry_panel: PanelContainer
+var telemetry_toggle: Button
 var impulse_x: LineEdit
 var impulse_y: LineEdit
 var impulse_z: LineEdit
 var burn_time: LineEdit
 
 var overlay: ColorRect
+var overlay_backdrop: ColorRect
 var overlay_chapter: Label
 var overlay_title: Label
 var overlay_story: Label
@@ -73,20 +87,33 @@ func _ready() -> void:
 	_load_mission(0)
 
 func _build_world() -> void:
+	var world_environment := WorldEnvironment.new()
+	world_environment.name = "CinematicEnvironment"
+	var environment := Environment.new()
+	environment.background_mode = Environment.BG_COLOR
+	environment.background_color = Color("02050a")
+	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.ambient_light_color = Color("29435f")
+	environment.ambient_light_energy = 0.38
+	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	world_environment.environment = environment
+	add_child(world_environment)
+
 	camera = Camera3D.new()
 	camera.name = "OrbitCamera"
-	camera.fov = 54.0
+	camera.fov = 49.0
 	add_child(camera)
 
 	var light := DirectionalLight3D.new()
 	light.rotation_degrees = Vector3(-52.0, -28.0, 18.0)
-	light.light_energy = 1.55
+	light.light_energy = 1.85
+	light.shadow_enabled = true
 	add_child(light)
 
 	var fill := OmniLight3D.new()
 	fill.position = Vector3(0.0, 3.0, 2.0)
 	fill.omni_range = 18.0
-	fill.light_energy = 0.42
+	fill.light_energy = 0.58
 	fill.light_color = Color("88bfff")
 	add_child(fill)
 
@@ -102,17 +129,17 @@ func _build_world() -> void:
 	grid.name = "NavigationGrid"
 	var grid_mesh := ImmediateMesh.new()
 	grid_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
-	for i in range(-12, 13):
+	for i in range(-10, 11):
 		var p := float(i) * 0.5
-		grid_mesh.surface_add_vertex(Vector3(p, 0.0, -6.0))
-		grid_mesh.surface_add_vertex(Vector3(p, 0.0, 6.0))
-		grid_mesh.surface_add_vertex(Vector3(-6.0, 0.0, p))
-		grid_mesh.surface_add_vertex(Vector3(6.0, 0.0, p))
+		grid_mesh.surface_add_vertex(Vector3(p, -0.012, -5.0))
+		grid_mesh.surface_add_vertex(Vector3(p, -0.012, 5.0))
+		grid_mesh.surface_add_vertex(Vector3(-5.0, -0.012, p))
+		grid_mesh.surface_add_vertex(Vector3(5.0, -0.012, p))
 	grid_mesh.surface_end()
 	grid.mesh = grid_mesh
 	var grid_material := StandardMaterial3D.new()
 	grid_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	grid_material.albedo_color = Color(0.12, 0.32, 0.50, 0.20)
+	grid_material.albedo_color = Color(0.08, 0.32, 0.46, 0.10)
 	grid_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	grid.material_override = grid_material
 	add_child(grid)
@@ -149,171 +176,240 @@ func _build_ui() -> void:
 	layer.name = "GameUI"
 	add_child(layer)
 
-	var panel := PanelContainer.new()
-	panel.name = "MissionPanel"
-	panel.set_anchors_preset(Control.PRESET_LEFT_WIDE)
-	panel.offset_left = 14.0
-	panel.offset_top = 14.0
-	panel.offset_right = 430.0
-	panel.offset_bottom = -14.0
-	panel.add_theme_stylebox_override("panel", _panel_style(Color(0.025, 0.040, 0.070, 0.94), Color("294b68")))
-	layer.add_child(panel)
+	var top_bar := PanelContainer.new()
+	top_bar.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	top_bar.offset_left = 18.0
+	top_bar.offset_top = 16.0
+	top_bar.offset_right = -18.0
+	top_bar.offset_bottom = 78.0
+	top_bar.add_theme_stylebox_override("panel", _panel_style(Color(0.018, 0.032, 0.050, 0.91), Color(0.18, 0.45, 0.58, 0.55), 10))
+	layer.add_child(top_bar)
 
-	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	panel.add_child(scroll)
-
-	var box := VBoxContainer.new()
-	box.name = "MissionControls"
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	box.add_theme_constant_override("separation", 8)
-	scroll.add_child(box)
+	var top_row := HBoxContainer.new()
+	top_row.add_theme_constant_override("separation", 18)
+	top_bar.add_child(top_row)
 
 	var brand := Label.new()
-	brand.text = "PHYZBOX // 余烬航线"
-	brand.add_theme_font_size_override("font_size", 23)
-	brand.modulate = Color("dcecff")
-	box.add_child(brand)
+	brand.text = "PHYZBOX"
+	brand.custom_minimum_size.x = 180.0
+	brand.add_theme_font_size_override("font_size", 22)
+	brand.modulate = TEXT_MAIN
+	top_row.add_child(brand)
 
-	var subtitle := Label.new()
-	subtitle.text = "真实引力轨道叙事游戏"
-	subtitle.modulate = Color("7699b8")
-	box.add_child(subtitle)
+	var route_mark := Label.new()
+	route_mark.text = "EMBER ROUTE  /  余烬航线"
+	route_mark.modulate = ACCENT
+	route_mark.add_theme_font_size_override("font_size", 13)
+	top_row.add_child(route_mark)
+
+	var top_spacer := Control.new()
+	top_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top_row.add_child(top_spacer)
 
 	mission_picker = OptionButton.new()
 	mission_picker.name = "MissionPicker"
-	mission_picker.tooltip_text = "已完成任务会解锁下一段航线"
+	mission_picker.custom_minimum_size = Vector2(265.0, 38.0)
+	mission_picker.tooltip_text = "航线任务 / 已完成任务会解锁下一段"
 	for index in range(Campaign.MISSIONS.size()):
-		var data: Dictionary = Campaign.mission(index)
-		mission_picker.add_item("%s  %s" % [data.code, data.title])
+		var picker_data: Dictionary = Campaign.mission(index)
+		mission_picker.add_item("%s  %s" % [picker_data.code, picker_data.title])
 	mission_picker.item_selected.connect(_mission_selected)
-	box.add_child(mission_picker)
+	top_row.add_child(mission_picker)
+
+	var panel := PanelContainer.new()
+	panel.name = "MissionPanel"
+	panel.position = Vector2(22.0, 96.0)
+	panel.size = Vector2(410.0, 150.0)
+	panel.add_theme_stylebox_override("panel", _panel_style(PANEL, Color(0.15, 0.46, 0.60, 0.72), 12))
+	layer.add_child(panel)
+
+	var mission_box := VBoxContainer.new()
+	mission_box.add_theme_constant_override("separation", 4)
+	panel.add_child(mission_box)
 
 	chapter_label = Label.new()
-	chapter_label.modulate = Color("78d7ff")
-	chapter_label.add_theme_font_size_override("font_size", 15)
-	box.add_child(chapter_label)
+	chapter_label.modulate = ACCENT
+	chapter_label.add_theme_font_size_override("font_size", 12)
+	mission_box.add_child(chapter_label)
 
 	mission_title = Label.new()
-	mission_title.add_theme_font_size_override("font_size", 22)
-	mission_title.modulate = Color("f2f7ff")
-	box.add_child(mission_title)
+	mission_title.add_theme_font_size_override("font_size", 25)
+	mission_title.modulate = TEXT_MAIN
+	mission_box.add_child(mission_title)
 
 	objective_label = Label.new()
-	objective_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	objective_label.custom_minimum_size.y = 48
-	objective_label.modulate = Color("d4deeb")
-	box.add_child(objective_label)
+	objective_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	objective_label.modulate = TEXT_MUTED
+	mission_box.add_child(objective_label)
 
 	progress_label = Label.new()
 	progress_label.name = "MissionProgress"
-	progress_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	progress_label.add_theme_font_size_override("font_size", 17)
-	progress_label.modulate = Color("8ee6c1")
-	box.add_child(progress_label)
+	progress_label.add_theme_font_size_override("font_size", 16)
+	progress_label.modulate = Color("83f3c5")
+	mission_box.add_child(progress_label)
 
-	var nav_separator := HSeparator.new()
-	box.add_child(nav_separator)
+	var bar_row := HBoxContainer.new()
+	bar_row.add_theme_constant_override("separation", 12)
+	mission_box.add_child(bar_row)
+	time_bar = _make_meter("T", Color("53c7ff"))
+	bar_row.add_child(time_bar.get_parent())
+	fuel_bar = _make_meter("ΔV", AMBER)
+	bar_row.add_child(fuel_bar.get_parent())
 
+	result_label = Label.new()
+	result_label.name = "ActionFeedback"
+	result_label.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	result_label.offset_left = -400.0
+	result_label.offset_top = -260.0
+	result_label.offset_right = 400.0
+	result_label.offset_bottom = -224.0
+	result_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	result_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	result_label.add_theme_font_size_override("font_size", 14)
+	result_label.modulate = Color("9cefd3")
+	layer.add_child(result_label)
+
+	var dock := PanelContainer.new()
+	dock.name = "CommandDock"
+	dock.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	dock.offset_left = -455.0
+	dock.offset_top = -215.0
+	dock.offset_right = 455.0
+	dock.offset_bottom = -20.0
+	dock.add_theme_stylebox_override("panel", _panel_style(Color(0.018, 0.032, 0.048, 0.94), Color(0.19, 0.50, 0.62, 0.72), 14))
+	layer.add_child(dock)
+
+	var dock_box := VBoxContainer.new()
+	dock_box.add_theme_constant_override("separation", 9)
+	dock.add_child(dock_box)
+
+	var dock_header := HBoxContainer.new()
+	dock_box.add_child(dock_header)
 	var nav_title := Label.new()
-	nav_title.text = "导航电脑 // 机动规划"
-	nav_title.modulate = Color("ffc96b")
-	nav_title.add_theme_font_size_override("font_size", 17)
-	box.add_child(nav_title)
+	nav_title.text = "MANEUVER NODE"
+	nav_title.modulate = AMBER
+	nav_title.add_theme_font_size_override("font_size", 13)
+	dock_header.add_child(nav_title)
+	var dock_spacer := Control.new()
+	dock_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	dock_header.add_child(dock_spacer)
+	var unit_label := Label.new()
+	unit_label.text = "Δv  AU/yr   ·   epoch  yr"
+	unit_label.modulate = TEXT_MUTED
+	unit_label.add_theme_font_size_override("font_size", 11)
+	dock_header.add_child(unit_label)
 
-	var guidance_button := Button.new()
-	guidance_button.name = "GuidanceButton"
-	guidance_button.text = "应用导航建议（可行解）"
-	guidance_button.tooltip_text = "填入经过自动测试的可行机动；你仍需预测、提交和执行"
-	guidance_button.pressed.connect(_apply_guidance)
-	guidance_button.add_to_group("playable_control")
-	box.add_child(guidance_button)
+	var controls_row := HBoxContainer.new()
+	controls_row.add_theme_constant_override("separation", 8)
+	dock_box.add_child(controls_row)
 
-	var maneuver_row := HBoxContainer.new()
 	for axis in ["X", "Y", "Z"]:
 		var column := VBoxContainer.new()
-		column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		column.custom_minimum_size.x = 92.0
 		var axis_label := Label.new()
-		axis_label.text = "Δv %s" % axis
+		axis_label.text = "ΔV%s" % axis
 		axis_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		axis_label.modulate = Color("91a8bd")
+		axis_label.modulate = TEXT_MUTED
+		axis_label.add_theme_font_size_override("font_size", 11)
 		column.add_child(axis_label)
 		var edit := LineEdit.new()
 		edit.name = "Impulse%s" % axis
 		edit.text = "0.000"
 		edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
-		edit.tooltip_text = "速度增量，单位 AU/年"
+		edit.tooltip_text = "惯性坐标速度增量，单位 AU/年"
+		_style_input(edit)
 		column.add_child(edit)
-		maneuver_row.add_child(column)
+		controls_row.add_child(column)
 		if axis == "X": impulse_x = edit
 		elif axis == "Y": impulse_y = edit
 		else: impulse_z = edit
-	box.add_child(maneuver_row)
 
-	var burn_time_row := HBoxContainer.new()
+	var time_column := VBoxContainer.new()
+	time_column.custom_minimum_size.x = 112.0
 	var burn_time_label := Label.new()
-	burn_time_label.text = "执行时刻（年）"
-	burn_time_row.add_child(burn_time_label)
+	burn_time_label.text = "EPOCH"
+	burn_time_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	burn_time_label.modulate = TEXT_MUTED
+	burn_time_label.add_theme_font_size_override("font_size", 11)
+	time_column.add_child(burn_time_label)
 	burn_time = LineEdit.new()
 	burn_time.text = "0.0000"
-	burn_time.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	burn_time.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	burn_time.tooltip_text = "绝对仿真时刻，不能早于当前时间"
-	burn_time_row.add_child(burn_time)
-	box.add_child(burn_time_row)
+	_style_input(burn_time)
+	time_column.add_child(burn_time)
+	controls_row.add_child(time_column)
 
-	var planning_buttons := HBoxContainer.new()
-	var predict_button := _make_button("预测轨迹", "PredictButton", _predict_maneuver)
-	planning_buttons.add_child(predict_button)
-	var commit_button := _make_button("提交节点", "CommitButton", _commit_maneuver)
-	planning_buttons.add_child(commit_button)
-	var cancel_button := _make_button("取消节点", "CancelButton", _cancel_maneuver)
-	planning_buttons.add_child(cancel_button)
-	box.add_child(planning_buttons)
+	var guidance_button := _make_button("导航解", "GuidanceButton", _apply_guidance)
+	guidance_button.tooltip_text = "载入通过自动验证的参考解；不会自动执行"
+	guidance_button.modulate = Color("b9dce5")
+	controls_row.add_child(guidance_button)
+	controls_row.add_child(_make_button("预演", "PredictButton", _predict_maneuver))
+	var commit_button := _make_button("锁定节点", "CommitButton", _commit_maneuver)
+	commit_button.add_theme_color_override("font_color", INK)
+	commit_button.add_theme_stylebox_override("normal", _button_style(AMBER, AMBER.lightened(0.18)))
+	controls_row.add_child(commit_button)
 
-	var execution_buttons := HBoxContainer.new()
-	time_button = _make_button("启动时间", "RunButton", _toggle_running)
-	execution_buttons.add_child(time_button)
-	execution_buttons.add_child(_make_button("立即点火", "BurnNowButton", _execute_maneuver))
-	execution_buttons.add_child(_make_button("单步", "SingleStepButton", _single_step))
-	box.add_child(execution_buttons)
+	var action_row := HBoxContainer.new()
+	action_row.add_theme_constant_override("separation", 7)
+	dock_box.add_child(action_row)
+	time_button = _make_button("▶  推进", "RunButton", _toggle_running)
+	time_button.custom_minimum_size.x = 135.0
+	time_button.add_theme_stylebox_override("normal", _button_style(Color("173e52"), ACCENT))
+	action_row.add_child(time_button)
+	action_row.add_child(_make_button("立即点火", "BurnNowButton", _execute_maneuver))
+	action_row.add_child(_make_button("取消节点", "CancelButton", _cancel_maneuver))
+	action_row.add_child(_make_button("单步", "SingleStepButton", _single_step))
+	action_row.add_child(_make_button("− 时间", "SlowerButton", _slower))
+	action_row.add_child(_make_button("+ 时间", "FasterButton", _faster))
+	action_row.add_child(_make_button("全局 H", "HomeCameraButton", _focus_system))
+	action_row.add_child(_make_button("目标 T", "TargetCameraButton", _focus_target))
 
-	var time_buttons := HBoxContainer.new()
-	time_buttons.add_child(_make_button("减速", "SlowerButton", _slower))
-	var home_button := _make_button("全局视角", "HomeCameraButton", _focus_system)
-	time_buttons.add_child(home_button)
-	var target_button := _make_button("目标视角", "TargetCameraButton", _focus_target)
-	time_buttons.add_child(target_button)
-	time_buttons.add_child(_make_button("加速", "FasterButton", _faster))
-	box.add_child(time_buttons)
+	telemetry_toggle = _make_button("专业数据  +", "TelemetryToggle", _toggle_telemetry)
+	telemetry_toggle.position = Vector2(0.0, 0.0)
+	telemetry_toggle.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	telemetry_toggle.offset_left = -168.0
+	telemetry_toggle.offset_top = 94.0
+	telemetry_toggle.offset_right = -22.0
+	telemetry_toggle.offset_bottom = 132.0
+	layer.add_child(telemetry_toggle)
 
-	result_label = Label.new()
-	result_label.name = "ActionFeedback"
-	result_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	result_label.custom_minimum_size.y = 46
-	result_label.modulate = Color("8ee6c1")
-	box.add_child(result_label)
+	telemetry_panel = PanelContainer.new()
+	telemetry_panel.name = "TelemetryPanel"
+	telemetry_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	telemetry_panel.offset_left = -370.0
+	telemetry_panel.offset_top = 142.0
+	telemetry_panel.offset_right = -22.0
+	telemetry_panel.offset_bottom = 352.0
+	telemetry_panel.add_theme_stylebox_override("panel", _panel_style(PANEL, Color(0.18, 0.43, 0.55, 0.58), 10))
+	telemetry_panel.visible = false
+	layer.add_child(telemetry_panel)
+
+	var telemetry_box := VBoxContainer.new()
+	telemetry_box.add_theme_constant_override("separation", 8)
+	telemetry_panel.add_child(telemetry_box)
+	var telemetry_title := Label.new()
+	telemetry_title.text = "FLIGHT DYNAMICS / 专业轨道数据"
+	telemetry_title.modulate = ACCENT
+	telemetry_title.add_theme_font_size_override("font_size", 12)
+	telemetry_box.add_child(telemetry_title)
 
 	telemetry_label = Label.new()
-	telemetry_label.modulate = Color("9db1c5")
-	telemetry_label.add_theme_font_size_override("font_size", 14)
-	box.add_child(telemetry_label)
+	telemetry_label.modulate = Color("a9c1d2")
+	telemetry_label.add_theme_font_size_override("font_size", 13)
+	telemetry_box.add_child(telemetry_label)
 
 	orbit_label = Label.new()
-	orbit_label.modulate = Color("71869a")
-	orbit_label.add_theme_font_size_override("font_size", 13)
-	box.add_child(orbit_label)
+	orbit_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	orbit_label.modulate = Color("7f9aab")
+	orbit_label.add_theme_font_size_override("font_size", 12)
+	telemetry_box.add_child(orbit_label)
 
 	var persistence_row := HBoxContainer.new()
-	persistence_row.add_child(_make_button("保存进度", "SaveButton", _save_snapshot))
-	persistence_row.add_child(_make_button("读取进度", "LoadButton", _load_snapshot))
-	persistence_row.add_child(_make_button("重开任务", "RestartButton", _restart_mission))
-	box.add_child(persistence_row)
-
-	var help := Label.new()
-	help.text = "拖动空白处旋转 · 滚轮缩放 · F飞船 · T目标 · H全局 · 空格暂停"
-	help.modulate = Color("667f96")
-	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(help)
+	persistence_row.add_child(_make_button("保存", "SaveButton", _save_snapshot))
+	persistence_row.add_child(_make_button("读取", "LoadButton", _load_snapshot))
+	persistence_row.add_child(_make_button("重开", "RestartButton", _restart_mission))
+	telemetry_box.add_child(persistence_row)
 
 	_build_story_overlay(layer)
 
@@ -321,62 +417,87 @@ func _build_story_overlay(layer: CanvasLayer) -> void:
 	overlay = ColorRect.new()
 	overlay.name = "StoryOverlay"
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	overlay.color = Color(0.005, 0.010, 0.025, 0.84)
+	overlay.color = Color.BLACK
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
 	layer.add_child(overlay)
 
+	overlay_backdrop = ColorRect.new()
+	overlay_backdrop.name = "ProceduralBackdrop"
+	overlay_backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay_backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var backdrop_material := ShaderMaterial.new()
+	backdrop_material.shader = BRIEFING_SHADER
+	overlay_backdrop.material = backdrop_material
+	overlay.add_child(overlay_backdrop)
+
+	var cinematic_scrim := ColorRect.new()
+	cinematic_scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	cinematic_scrim.color = Color(0.005, 0.012, 0.020, 0.18)
+	cinematic_scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	overlay.add_child(cinematic_scrim)
+
 	var card := PanelContainer.new()
-	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.offset_left = -330.0
-	card.offset_top = -235.0
-	card.offset_right = 330.0
-	card.offset_bottom = 235.0
-	card.add_theme_stylebox_override("panel", _panel_style(Color(0.025, 0.050, 0.085, 0.98), Color("3a789e")))
+	card.set_anchors_preset(Control.PRESET_CENTER_LEFT)
+	card.offset_left = 64.0
+	card.offset_top = -250.0
+	card.offset_right = 570.0
+	card.offset_bottom = 250.0
+	card.add_theme_stylebox_override("panel", _panel_style(Color(0.018, 0.032, 0.048, 0.93), Color(0.23, 0.62, 0.72, 0.74), 16))
 	overlay.add_child(card)
 
 	var content := VBoxContainer.new()
-	content.add_theme_constant_override("separation", 14)
+	content.add_theme_constant_override("separation", 15)
 	card.add_child(content)
 
 	var campaign_name := Label.new()
-	campaign_name.text = Campaign.CAMPAIGN_TITLE
-	campaign_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	campaign_name.add_theme_font_size_override("font_size", 16)
-	campaign_name.modulate = Color("78d7ff")
+	campaign_name.text = "PHYZBOX  /  %s" % Campaign.CAMPAIGN_TITLE
+	campaign_name.add_theme_font_size_override("font_size", 13)
+	campaign_name.modulate = ACCENT
 	content.add_child(campaign_name)
 
 	overlay_chapter = Label.new()
-	overlay_chapter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	overlay_chapter.modulate = Color("91a8bd")
+	overlay_chapter.modulate = TEXT_MUTED
+	overlay_chapter.add_theme_font_size_override("font_size", 13)
 	content.add_child(overlay_chapter)
 
 	overlay_title = Label.new()
-	overlay_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	overlay_title.add_theme_font_size_override("font_size", 29)
-	overlay_title.modulate = Color("f3f7ff")
+	overlay_title.add_theme_font_size_override("font_size", 36)
+	overlay_title.modulate = TEXT_MAIN
 	content.add_child(overlay_title)
+
+	var title_rule := HSeparator.new()
+	title_rule.modulate = Color(0.25, 0.70, 0.78, 0.55)
+	content.add_child(title_rule)
 
 	overlay_story = Label.new()
 	overlay_story.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	overlay_story.custom_minimum_size.y = 108
-	overlay_story.add_theme_font_size_override("font_size", 17)
-	overlay_story.modulate = Color("cbd8e5")
+	overlay_story.custom_minimum_size.y = 82
+	overlay_story.add_theme_font_size_override("font_size", 16)
+	overlay_story.modulate = Color("c5d4df")
 	content.add_child(overlay_story)
 
+	var objective_card := PanelContainer.new()
+	objective_card.add_theme_stylebox_override("panel", _panel_style(Color(0.04, 0.12, 0.14, 0.86), Color(0.25, 0.78, 0.67, 0.70), 8))
+	content.add_child(objective_card)
 	overlay_objective = Label.new()
 	overlay_objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	overlay_objective.modulate = Color("8ee6c1")
-	overlay_objective.add_theme_font_size_override("font_size", 18)
-	content.add_child(overlay_objective)
+	overlay_objective.modulate = Color("a1f4d5")
+	overlay_objective.add_theme_font_size_override("font_size", 16)
+	objective_card.add_child(overlay_objective)
 
 	overlay_tutorial = Label.new()
 	overlay_tutorial.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	overlay_tutorial.modulate = Color("ffc96b")
+	overlay_tutorial.modulate = Color("f2c178")
+	overlay_tutorial.add_theme_font_size_override("font_size", 13)
 	content.add_child(overlay_tutorial)
 
 	overlay_button = Button.new()
 	overlay_button.name = "StoryActionButton"
-	overlay_button.custom_minimum_size.y = 48
+	overlay_button.custom_minimum_size.y = 54
+	overlay_button.add_theme_font_size_override("font_size", 16)
+	overlay_button.add_theme_color_override("font_color", INK)
+	overlay_button.add_theme_stylebox_override("normal", _button_style(AMBER, AMBER.lightened(0.18)))
+	overlay_button.add_theme_stylebox_override("hover", _button_style(AMBER.lightened(0.12), Color.WHITE))
 	overlay_button.pressed.connect(_overlay_action_pressed)
 	content.add_child(overlay_button)
 
@@ -385,21 +506,74 @@ func _make_button(text: String, name: String, callback: Callable) -> Button:
 	button.name = name
 	button.text = text
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.custom_minimum_size.y = 38.0
+	button.add_theme_font_size_override("font_size", 13)
+	button.add_theme_color_override("font_color", Color("bed1df"))
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.add_theme_stylebox_override("normal", _button_style(Color("102331"), Color("315c70")))
+	button.add_theme_stylebox_override("hover", _button_style(Color("17384a"), ACCENT))
+	button.add_theme_stylebox_override("pressed", _button_style(Color("0c1a24"), AMBER))
 	button.pressed.connect(callback)
 	button.add_to_group("playable_control")
 	return button
 
-func _panel_style(background: Color, border: Color) -> StyleBoxFlat:
+func _panel_style(background: Color, border: Color, radius := 8) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = background
 	style.border_color = border
 	style.set_border_width_all(1)
-	style.set_corner_radius_all(8)
+	style.set_corner_radius_all(radius)
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.50)
+	style.shadow_size = 10
 	style.content_margin_left = 14.0
 	style.content_margin_right = 14.0
 	style.content_margin_top = 12.0
 	style.content_margin_bottom = 12.0
 	return style
+
+func _button_style(background: Color, border: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background
+	style.border_color = border
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(6)
+	style.content_margin_left = 10.0
+	style.content_margin_right = 10.0
+	style.content_margin_top = 7.0
+	style.content_margin_bottom = 7.0
+	return style
+
+func _style_input(edit: LineEdit) -> void:
+	edit.custom_minimum_size.y = 38.0
+	edit.add_theme_font_size_override("font_size", 15)
+	edit.add_theme_color_override("font_color", Color("d8f6ff"))
+	edit.add_theme_color_override("caret_color", ACCENT)
+	edit.add_theme_stylebox_override("normal", _button_style(Color("081722"), Color("234a5d")))
+	edit.add_theme_stylebox_override("focus", _button_style(Color("0b1d29"), ACCENT))
+
+func _make_meter(caption: String, color: Color) -> ProgressBar:
+	var row := HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var label := Label.new()
+	label.text = caption
+	label.custom_minimum_size.x = 28.0
+	label.modulate = TEXT_MUTED
+	label.add_theme_font_size_override("font_size", 10)
+	row.add_child(label)
+	var meter := ProgressBar.new()
+	meter.show_percentage = false
+	meter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	meter.custom_minimum_size = Vector2(120.0, 8.0)
+	var background := StyleBoxFlat.new()
+	background.bg_color = Color("0a1822")
+	background.set_corner_radius_all(4)
+	var fill := StyleBoxFlat.new()
+	fill.bg_color = color
+	fill.set_corner_radius_all(4)
+	meter.add_theme_stylebox_override("background", background)
+	meter.add_theme_stylebox_override("fill", fill)
+	row.add_child(meter)
+	return meter
 
 func _process(delta: float) -> void:
 	if running and not mission_finished:
@@ -443,7 +617,7 @@ func _load_mission(index: int, show_briefing := true) -> void:
 	running = false
 	mission_finished = false
 	if time_button:
-		time_button.text = "启动时间"
+		time_button.text = "▶  推进"
 	simulation.load_mission(current_mission)
 	var definition: Dictionary = simulation.get_mission_definition()
 	selected_body_id = int(definition.player_body_id)
@@ -473,12 +647,17 @@ func _show_briefing() -> void:
 	var mission: Dictionary = Campaign.mission(current_mission)
 	var chapter: Dictionary = Campaign.chapter(int(mission.chapter))
 	overlay_mode = "briefing"
+	var chapter_index := int(mission.chapter)
+	var accents := [Color("38c8dc"), Color("7d8cff"), Color("ef9a4a")]
+	var backdrop_material := overlay_backdrop.material as ShaderMaterial
+	backdrop_material.set_shader_parameter("chapter", float(chapter_index))
+	backdrop_material.set_shader_parameter("accent_color", accents[chapter_index])
 	overlay_chapter.text = str(chapter.title)
 	overlay_title.text = "%s // %s" % [mission.code, mission.title]
-	overlay_story.text = "%s\n\n%s" % [chapter.summary, mission.story]
-	overlay_objective.text = "目标：%s" % mission.objective
-	overlay_tutorial.text = "导航核心：%s" % mission.tutorial
-	overlay_button.text = "进入任务"
+	overlay_story.text = str(mission.story)
+	overlay_objective.text = "MISSION  /  %s" % mission.objective
+	overlay_tutorial.text = "NAV  /  %s" % mission.tutorial
+	overlay_button.text = "进入航线   →"
 	overlay.visible = true
 
 func _show_debrief(success: bool, score := 0.0) -> void:
@@ -490,7 +669,7 @@ func _show_debrief(success: bool, score := 0.0) -> void:
 	overlay_tutorial.text = "更少的delta-v会得到更高评分。" if success else "黄色预测线是独立物理分支，不会改写当前状态。"
 	if success and current_mission + 1 < Campaign.MISSIONS.size():
 		overlay_mode = "next"
-		overlay_button.text = "进入下一任务"
+		overlay_button.text = "进入下一任务   →"
 	elif success:
 		overlay_mode = "finale"
 		overlay_button.text = "返回星图"
@@ -531,6 +710,7 @@ func _clear_visuals() -> void:
 	for node in trail_meshes.values():
 		node.queue_free()
 	body_nodes.clear()
+	body_visuals.clear()
 	body_local_positions.clear()
 	trail_meshes.clear()
 	trails.clear()
@@ -550,6 +730,11 @@ func _update_bodies() -> void:
 		var local_position := _v3(data.position) - origin
 		body_local_positions[id] = local_position
 		body_nodes[id].position = local_position
+		if body_visuals.has(id) and int(data.kind) == 6:
+			var velocity_direction := _v3(data.velocity).normalized()
+			if velocity_direction.length_squared() > 0.001:
+				var visual: Node3D = body_visuals[id]
+				visual.look_at(visual.global_position + velocity_direction, Vector3.UP)
 		if not trails.has(id):
 			trails[id] = PackedVector3Array()
 		var points: PackedVector3Array = trails[id]
@@ -577,37 +762,36 @@ func _create_body_node(data: Dictionary) -> void:
 	elif id == primary_body_id:
 		radius = max(radius, 0.13)
 
-	var sphere := SphereMesh.new()
-	sphere.radius = radius
-	sphere.height = radius * 2.0
-	sphere.radial_segments = 28
-	sphere.rings = 16
-	var mesh_instance := MeshInstance3D.new()
-	mesh_instance.mesh = sphere
-	var material := StandardMaterial3D.new()
 	var color: Color = COLORS[int(data.kind) % COLORS.size()]
 	if id == selected_body_id: color = PLAYER_COLOR
 	elif id == target_body_id: color = TARGET_COLOR
 	elif id == primary_body_id: color = PRIMARY_COLOR
-	material.albedo_color = color
-	material.emission_enabled = true
-	material.emission = color * (1.25 if id == primary_body_id else 0.42)
-	mesh_instance.material_override = material
-	holder.add_child(mesh_instance)
 
-	var role := ""
-	if id == selected_body_id: role = "  [你的飞船]"
-	elif id == target_body_id: role = "  [任务目标]"
-	elif id == primary_body_id: role = "  [主天体]"
+	var visual: Node3D
+	if int(data.kind) == 6:
+		visual = _create_spacecraft_visual(radius, id == selected_body_id, id == target_body_id)
+	elif str(data.name).contains("Station"):
+		visual = _create_station_visual(radius)
+	else:
+		visual = _create_celestial_visual(radius, color, id == primary_body_id, int(data.kind))
+	visual.name = "SpacecraftVisual" if int(data.kind) == 6 else "BodyVisual"
+	holder.add_child(visual)
+	body_visuals[id] = visual
+
+	var role := str(data.name).to_upper()
+	if id == selected_body_id and int(data.kind) == 6:
+		role = "%s  /  你的飞船" % role
+	elif id == target_body_id:
+		role = "◇  %s" % role
 	var label := Label3D.new()
-	label.text = "%s%s" % [str(data.name), role]
-	label.position = Vector3(0.0, radius + 0.085, 0.0)
-	label.font_size = 28
-	label.outline_size = 7
-	label.pixel_size = 0.0027
+	label.text = role
+	label.position = Vector3(0.0, radius + 0.10, 0.0)
+	label.font_size = 21 if id == primary_body_id else 24
+	label.outline_size = 6
+	label.pixel_size = 0.0024
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
-	label.modulate = color.lightened(0.18)
+	label.modulate = color.lightened(0.10)
 	holder.add_child(label)
 
 	if id == selected_body_id or id == target_body_id:
@@ -618,6 +802,145 @@ func _create_body_node(data: Dictionary) -> void:
 	trail.name = "Trail_%s" % id
 	add_child(trail)
 	trail_meshes[id] = trail
+
+func _create_spacecraft_visual(radius: float, is_player: bool, is_target: bool) -> Node3D:
+	var root := Node3D.new()
+	root.scale = Vector3.ONE * (radius / 0.085)
+
+	var hull := _space_material(Color("7f8d96"), Color("243943"), 0.15)
+	var dark_hull := _space_material(Color("202b32"), Color("0b151b"), 0.10)
+	var ceramic := _space_material(Color("d7d8d1"), Color("626968"), 0.10)
+	var solar := _space_material(Color("0a3557"), Color("1475a6"), 0.48)
+	var cyan_light := _space_material(Color("66e9ff"), Color("42dfff"), 2.2)
+	var amber_light := _space_material(Color("ffb34f"), Color("ff9a35"), 1.8)
+
+	_add_cylinder(root, 0.043, 0.043, 0.22, Vector3.ZERO, Vector3(PI * 0.5, 0.0, 0.0), hull)
+	_add_cylinder(root, 0.052, 0.045, 0.055, Vector3(0.0, 0.0, -0.13), Vector3(PI * 0.5, 0.0, 0.0), ceramic)
+	_add_cylinder(root, 0.050, 0.038, 0.050, Vector3(0.0, 0.0, 0.13), Vector3(PI * 0.5, 0.0, 0.0), dark_hull)
+
+	_add_box(root, Vector3(0.16, 0.010, 0.018), Vector3(-0.10, 0.0, 0.0), dark_hull)
+	_add_box(root, Vector3(0.16, 0.010, 0.018), Vector3(0.10, 0.0, 0.0), dark_hull)
+	for side in [-1.0, 1.0]:
+		var panel_x: float = float(side) * 0.19
+		_add_box(root, Vector3(0.20, 0.008, 0.082), Vector3(panel_x, 0.0, 0.0), solar)
+		_add_box(root, Vector3(0.003, 0.010, 0.080), Vector3(panel_x, 0.0, 0.0), dark_hull)
+		_add_box(root, Vector3(0.196, 0.010, 0.003), Vector3(panel_x, 0.0, 0.0), dark_hull)
+
+	_add_box(root, Vector3(0.075, 0.006, 0.090), Vector3(0.0, 0.072, 0.012), ceramic)
+	_add_box(root, Vector3(0.075, 0.006, 0.090), Vector3(0.0, -0.072, 0.012), ceramic)
+	_add_cylinder(root, 0.004, 0.004, 0.080, Vector3(0.0, 0.082, -0.035), Vector3.ZERO, dark_hull)
+	_add_cylinder(root, 0.030, 0.030, 0.006, Vector3(0.0, 0.122, -0.035), Vector3.ZERO, ceramic)
+
+	for x_sign in [-1.0, 1.0]:
+		for y_sign in [-1.0, 1.0]:
+			var nozzle_position := Vector3(float(x_sign) * 0.022, float(y_sign) * 0.020, 0.165)
+			_add_cylinder(root, 0.011, 0.016, 0.040, nozzle_position, Vector3(PI * 0.5, 0.0, 0.0), dark_hull)
+			_add_cylinder(root, 0.002, 0.010, 0.050, nozzle_position + Vector3(0.0, 0.0, 0.042), Vector3(PI * 0.5, 0.0, 0.0), cyan_light)
+
+	for pod_x in [-0.052, 0.052]:
+		_add_box(root, Vector3(0.022, 0.022, 0.040), Vector3(pod_x, 0.0, -0.070), dark_hull)
+
+	var status_material := cyan_light if is_player else (amber_light if is_target else cyan_light)
+	_add_sphere(root, 0.009, Vector3(0.0, 0.052, -0.125), status_material)
+	return root
+
+func _create_station_visual(radius: float) -> Node3D:
+	var root := Node3D.new()
+	root.scale = Vector3.ONE * (radius / 0.10)
+	var metal := _space_material(Color("77838d"), Color("2b3941"), 0.20)
+	var solar := _space_material(Color("102443"), Color("6f2471"), 0.45)
+	var signal_material := _space_material(TARGET_COLOR, TARGET_COLOR, 1.7)
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.055
+	torus.outer_radius = 0.072
+	torus.rings = 18
+	torus.ring_segments = 32
+	var ring := MeshInstance3D.new()
+	ring.mesh = torus
+	ring.rotation_degrees = Vector3(68.0, 18.0, 0.0)
+	ring.material_override = metal
+	root.add_child(ring)
+	_add_cylinder(root, 0.026, 0.026, 0.120, Vector3.ZERO, Vector3(PI * 0.5, 0.0, 0.0), metal)
+	_add_box(root, Vector3(0.20, 0.006, 0.050), Vector3.ZERO, solar)
+	_add_sphere(root, 0.014, Vector3(0.0, 0.050, 0.0), signal_material)
+	return root
+
+func _create_celestial_visual(radius: float, color: Color, is_primary: bool, kind: int) -> Node3D:
+	var root := Node3D.new()
+	var sphere := SphereMesh.new()
+	sphere.radius = radius
+	sphere.height = radius * 2.0
+	sphere.radial_segments = 36
+	sphere.rings = 20
+	var material := _space_material(color.darkened(0.10), color, 1.45 if is_primary else 0.28)
+	var body := MeshInstance3D.new()
+	body.mesh = sphere
+	body.material_override = material
+	if kind == 5:
+		body.scale = Vector3(1.18, 0.82, 0.96)
+	root.add_child(body)
+	if is_primary:
+		var halo_sphere := SphereMesh.new()
+		halo_sphere.radius = radius * 1.18
+		halo_sphere.height = radius * 2.36
+		halo_sphere.radial_segments = 28
+		halo_sphere.rings = 14
+		var halo := MeshInstance3D.new()
+		halo.mesh = halo_sphere
+		var halo_material := _space_material(Color(color.r, color.g, color.b, 0.10), color, 0.9)
+		halo_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		halo_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		halo.material_override = halo_material
+		root.add_child(halo)
+	return root
+
+func _space_material(albedo: Color, emission_color: Color, emission_strength: float) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = albedo
+	if emission_strength > 0.0:
+		material.emission_enabled = true
+		material.emission = emission_color * emission_strength
+	material.metallic = 0.55
+	material.roughness = 0.42
+	return material
+
+func _add_box(parent: Node3D, size: Vector3, position: Vector3, material: Material) -> MeshInstance3D:
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.position = position
+	instance.material_override = material
+	parent.add_child(instance)
+	return instance
+
+func _add_cylinder(parent: Node3D, top_radius: float, bottom_radius: float, height: float,
+		position: Vector3, rotation: Vector3, material: Material) -> MeshInstance3D:
+	var mesh := CylinderMesh.new()
+	mesh.top_radius = top_radius
+	mesh.bottom_radius = bottom_radius
+	mesh.height = height
+	mesh.radial_segments = 18
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.position = position
+	instance.rotation = rotation
+	instance.material_override = material
+	parent.add_child(instance)
+	return instance
+
+func _add_sphere(parent: Node3D, radius: float, position: Vector3, material: Material) -> MeshInstance3D:
+	var mesh := SphereMesh.new()
+	mesh.radius = radius
+	mesh.height = radius * 2.0
+	mesh.radial_segments = 18
+	mesh.rings = 10
+	var instance := MeshInstance3D.new()
+	instance.mesh = mesh
+	instance.position = position
+	instance.material_override = material
+	parent.add_child(instance)
+	return instance
 
 func _make_marker(radius: float, color: Color) -> MeshInstance3D:
 	var marker := MeshInstance3D.new()
@@ -711,9 +1034,13 @@ func _update_telemetry() -> void:
 	if bool(scheduled.get("active", false)):
 		node_status = "%.4f年" % float(scheduled.time)
 	var reserved := float(definition.get("delta_v_reserved", 0.0))
+	var deadline := float(definition.deadline)
+	var budget := float(definition.delta_v_budget)
+	time_bar.value = clampf(simulation.get_time() / maxf(deadline, 1.0e-9) * 100.0, 0.0, 100.0)
+	fuel_bar.value = clampf((budget - float(definition.delta_v_spent) - reserved) / maxf(budget, 1.0e-9) * 100.0, 0.0, 100.0)
 	telemetry_label.text = "时间 %.4f / %.2f年   倍速 %.2fx\n燃料 %.3f已用 + %.3f预留 / %.3f AU/年   节点 %s\n%s · 固定步长 %s年" % [
-		simulation.get_time(), float(definition.deadline), float(TIME_RATES[time_rate_index]),
-		float(definition.delta_v_spent), reserved, float(definition.delta_v_budget), node_status,
+		simulation.get_time(), deadline, float(TIME_RATES[time_rate_index]),
+		float(definition.delta_v_spent), reserved, budget, node_status,
 		simulation.get_integrator_name(), String.num_scientific(simulation.get_fixed_step())
 	]
 	_update_progress_text(evaluation)
@@ -733,22 +1060,22 @@ func _update_telemetry() -> void:
 func _update_progress_text(evaluation: Dictionary) -> void:
 	match current_mission:
 		0:
-			progress_label.text = "目标距离 %.3f AU  /  需要 < 0.120" % float(evaluation.distance)
+			progress_label.text = "RANGE  %.3f AU     GOAL  < 0.120" % float(evaluation.distance)
 		1:
-			progress_label.text = "距离 %.3f AU  /  相对速度 %.3f AU/年" % [
+			progress_label.text = "RANGE %.3f AU    REL-V %.3f AU/yr" % [
 				float(evaluation.distance), float(evaluation.relative_speed)
 			]
 		2:
-			progress_label.text = "速度保留 %.1f%%  /  掠过后需要 > 96%%" % (float(evaluation.speed_ratio) * 100.0)
+			progress_label.text = "EXIT ENERGY  %.1f%%     GOAL  > 96%%" % (float(evaluation.speed_ratio) * 100.0)
 		3:
-			progress_label.text = "威胁距离 %.3f AU  /  截止时需要 > 0.250" % float(evaluation.distance)
+			progress_label.text = "MISS DISTANCE  %.3f AU     GOAL  > 0.250" % float(evaluation.distance)
 		4:
-			progress_label.text = "观测存活 %.3f / 1.400 年" % simulation.get_time()
+			progress_label.text = "SURVIVAL  %.3f / 1.400 yr" % simulation.get_time()
 
 func _complete_mission(score: float) -> void:
 	mission_finished = true
 	running = false
-	time_button.text = "启动时间"
+	time_button.text = "▶  推进"
 	best_scores[current_mission] = maxf(float(best_scores.get(current_mission, 0.0)), score)
 	if current_mission >= unlocked_mission and current_mission + 1 < Campaign.MISSIONS.size():
 		unlocked_mission = current_mission + 1
@@ -760,7 +1087,7 @@ func _complete_mission(score: float) -> void:
 func _fail_mission() -> void:
 	mission_finished = true
 	running = false
-	time_button.text = "启动时间"
+	time_button.text = "▶  推进"
 	result_label.text = "任务失败。读取快照或重新开始。"
 	_show_debrief(false)
 
@@ -768,7 +1095,11 @@ func _toggle_running() -> void:
 	if overlay.visible or mission_finished:
 		return
 	running = not running
-	time_button.text = "暂停时间" if running else "启动时间"
+	time_button.text = "Ⅱ  暂停" if running else "▶  推进"
+
+func _toggle_telemetry() -> void:
+	telemetry_panel.visible = not telemetry_panel.visible
+	telemetry_toggle.text = "专业数据  −" if telemetry_panel.visible else "专业数据  +"
 
 func _single_step() -> void:
 	if not mission_finished:

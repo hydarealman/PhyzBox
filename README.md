@@ -14,6 +14,8 @@
 
 游戏不是按预设路径播放动画：天体位置、引力弹弓、交会距离和任务结果全部由 C++20 `libphyz` 双精度 N-body 引擎实时计算。Godot 负责驾驶舱、剧情、镜头和反馈，旧版 Win32/OpenGL 程序作为科学实验室保留。
 
+剧情简报背景由 Godot shader 实时绘制星空、行星边缘光与轨道线，不使用生成式贴图。专业遥测默认折叠；主画面只保留任务指标、轨迹与机动控制。飞船由推进舱、太阳翼、散热板、天线、RCS 和四组电推进器构成，不再用球体代替。
+
 ## 立即游玩
 
 已经构建发布包时，直接运行：
@@ -30,7 +32,7 @@
 .\scripts\run_game.ps1
 ```
 
-Windows 游戏生成在 `dist/PhyzBox.exe`。物理库使用者参阅 [libphyz/README.md](libphyz/README.md)，游戏开发说明参阅 [godot/README.md](godot/README.md)，完整实施与验收记录见 [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md)。
+Windows 游戏生成在 `dist/PhyzBox.exe`。物理库使用者参阅 [libphyz/README.md](libphyz/README.md)，游戏开发说明参阅 [godot/README.md](godot/README.md)，完整实施与验收记录见 [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md)，视觉设计决策见 [VISUAL_REDESIGN_REPORT.md](VISUAL_REDESIGN_REPORT.md)。
 
 ## 怎么玩
 
@@ -53,6 +55,8 @@ Windows 游戏生成在 `dist/PhyzBox.exe`。物理库使用者参阅 [libphyz/R
 - 左侧按钮：预测、提交/取消节点、立即点火、单步推进、改变时间倍率、保存/载入
 
 ## 三章五关
+
+![余烬航线章节简报](docs/images/ember-route-briefing.png)
 
 | 章节 | 任务 | 核心玩法 |
 |---|---|---|

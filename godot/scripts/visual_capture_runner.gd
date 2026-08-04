@@ -9,6 +9,11 @@ func _capture() -> void:
 	root.add_child(game)
 	for frame in range(6):
 		await process_frame
+	await RenderingServer.frame_post_draw
+	var briefing_output := ProjectSettings.globalize_path("res://../.runtime/briefing-preview.png")
+	DirAccess.make_dir_recursive_absolute(briefing_output.get_base_dir())
+	var briefing_result := root.get_texture().get_image().save_png(briefing_output)
+	print("Briefing capture: ", briefing_output, " result=", briefing_result)
 	var action := game.find_child("StoryActionButton", true, false) as Button
 	var guidance := game.find_child("GuidanceButton", true, false) as Button
 	action.pressed.emit()
@@ -20,4 +25,4 @@ func _capture() -> void:
 	DirAccess.make_dir_recursive_absolute(output.get_base_dir())
 	var result := root.get_texture().get_image().save_png(output)
 	print("UI capture: ", output, " result=", result)
-	quit(0 if result == OK else 1)
+	quit(0 if result == OK and briefing_result == OK else 1)

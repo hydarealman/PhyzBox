@@ -2,6 +2,15 @@
 
 ## [Unreleased] — 2026-08-04
 
+### Visual overhaul — 2026-08-05
+- Rebuilt the cockpit around a cinematic top route bar, compact objective card and bottom maneuver dock
+- Moved integrator, orbital elements and persistence controls into an optional professional telemetry panel
+- Replaced the player sphere with a velocity-aligned component spacecraft featuring solar arrays, radiators, antenna, RCS pods and four electric thrusters
+- Added a distinct orbital-station visual for rendezvous targets and reduced oversized world labels
+- Added a cinematic mission briefing with a fully procedural Godot shader backdrop; no generated chapter textures
+- Added filmic lighting, restrained navigation grid styling, stronger color semantics and visual-regression screenshots
+- Extended UI smoke tests to verify compact layout, collapsed telemetry, chapter art and component-built spacecraft
+
 ### Added
 - Added `libphyz` 0.1, a frontend-independent C++20 astrodynamics library with stable body IDs and explicit unit systems
 - Added composable Newtonian, Plummer and Paczynski-Wiita gravity plus constant-acceleration force models
