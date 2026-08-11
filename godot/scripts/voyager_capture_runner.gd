@@ -24,5 +24,10 @@ func _capture() -> void:
 		await process_frame
 	await RenderingServer.frame_post_draw
 	var jupiter_result := root.get_texture().get_image().save_png(root_path.path_join("voyager-jupiter.png"))
-	print("Voyager captures: ", launch_result, " ", map_result, " ", jupiter_result)
-	quit(0 if launch_result == OK and map_result == OK and jupiter_result == OK else 1)
+	game.call("_event_selected", 2)
+	for frame in range(5):
+		await process_frame
+	await RenderingServer.frame_post_draw
+	var saturn_result := root.get_texture().get_image().save_png(root_path.path_join("voyager-saturn.png"))
+	print("Voyager captures: ", launch_result, " ", map_result, " ", jupiter_result, " ", saturn_result)
+	quit(0 if launch_result == OK and map_result == OK and jupiter_result == OK and saturn_result == OK else 1)

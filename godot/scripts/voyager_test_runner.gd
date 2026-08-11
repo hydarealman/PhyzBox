@@ -62,6 +62,28 @@ func _run() -> void:
 	var earth_surface := earth.get_node_or_null("Surface") as MeshInstance3D
 	check(earth.visible and earth_surface.scale.x > 5.0, "Earth dominates the launch view at physical angular scale")
 	check(game.get_node_or_null("VoyagerOnePhysicalModel") != null, "Voyager is a constructed spacecraft model")
+	check(bool(game.audience_grade), "audience-friendly mission visualization is the default color grade")
+	check(float(game.world_environment.tonemap_exposure) > 1.2, "default grade lifts exposure for viewers")
+	check(Color(game.world_environment.ambient_light_color).get_luminance() > 0.25,
+		"default grade keeps shadow detail visible")
+	var mars_material := (game.get_node("HistoricalBody_499/Surface") as MeshInstance3D).material_override as ShaderMaterial
+	var saturn_material := (game.get_node("HistoricalBody_6/Surface") as MeshInstance3D).material_override as ShaderMaterial
+	var neptune_material := (game.get_node("HistoricalBody_8/Surface") as MeshInstance3D).material_override as ShaderMaterial
+	var saturn_rings := game.get_node_or_null("HistoricalBody_6/Rings") as Node3D
+	var mars_red: Color = mars_material.get_shader_parameter("land_color")
+	var saturn_gold: Color = saturn_material.get_shader_parameter("highland_color")
+	var neptune_blue: Color = neptune_material.get_shader_parameter("highland_color")
+	check(mars_red.r > mars_red.g * 1.6, "Mars palette preserves iron-oxide red")
+	check(saturn_gold.r > saturn_gold.b * 1.4 and saturn_gold.g > saturn_gold.b * 1.2,
+		"Saturn palette preserves pale gold clouds")
+	check(saturn_rings != null and saturn_rings.get_child_count() == 1,
+		"Saturn uses the procedural thin-ring model")
+	check(neptune_blue.b > neptune_blue.r * 1.8, "Neptune palette preserves deep blue appearance")
+	var bright_exposure: float = float(game.world_environment.tonemap_exposure)
+	game.call("_toggle_color_grade")
+	check(not bool(game.audience_grade) and float(game.world_environment.tonemap_exposure) < bright_exposure,
+		"C switches to lower physical exposure")
+	game.call("_toggle_color_grade")
 
 	var initial_epoch: float = float(game.current_epoch)
 	game.rate_index = 0

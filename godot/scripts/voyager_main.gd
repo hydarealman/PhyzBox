@@ -5,6 +5,7 @@ const PLANET_SHADER = preload("res://shaders/planet_surface.gdshader")
 const STAR_SHADER = preload("res://shaders/hipparcos_stars.gdshader")
 const GALACTIC_SKY_SHADER = preload("res://shaders/galactic_sky.gdshader")
 const ATMOSPHERE_SHADER = preload("res://shaders/atmosphere.gdshader")
+const SATURN_RING_SHADER = preload("res://shaders/saturn_rings.gdshader")
 const EPHEMERIS_PATH := "res://data/voyager_ephemeris.phyz"
 const STAR_CATALOG_PATH := "res://data/hipparcos_bright.phyzstars"
 const AU_KM := 149_597_870.7
@@ -28,6 +29,18 @@ const BODY_DATA := {
 	7: {"name": "天王星", "radius": 25_362.0, "color": Color("83d7df")},
 	8: {"name": "海王星", "radius": 24_622.0, "color": Color("496ed1")},
 	9: {"name": "冥王星", "radius": 1_188.3, "color": Color("a99583")},
+}
+const BODY_PALETTES := {
+	199: {"low": Color("343331"), "mid": Color("77736d"), "high": Color("bbb4a9"), "ice": Color("d7d2c8"), "cloud": Color("d8d4cb")},
+	299: {"low": Color("6f4a22"), "mid": Color("b67b35"), "high": Color("f0c875"), "ice": Color("fff0bf"), "cloud": Color("f4d58d")},
+	399: {"low": Color("0b4f8a"), "mid": Color("3d7651"), "high": Color("a49362"), "ice": Color("edf7fb"), "cloud": Color("eaf4f7")},
+	301: {"low": Color("2e2d2b"), "mid": Color("77736d"), "high": Color("aaa59b"), "ice": Color("cbc7bf"), "cloud": Color("cbc7bf")},
+	499: {"low": Color("3c1712"), "mid": Color("983b27"), "high": Color("d97848"), "ice": Color("ead8c9"), "cloud": Color("d9a17d")},
+	5: {"low": Color("4b2c24"), "mid": Color("ad7650"), "high": Color("efd2a2"), "ice": Color("fff0d0"), "cloud": Color("f2d9b3")},
+	6: {"low": Color("655037"), "mid": Color("c5a666"), "high": Color("f0d995"), "ice": Color("fff0c4"), "cloud": Color("f2dda8")},
+	7: {"low": Color("174d59"), "mid": Color("59b6be"), "high": Color("b5e8e9"), "ice": Color("d7f5f4"), "cloud": Color("bdebed")},
+	8: {"low": Color("07143c"), "mid": Color("1e459a"), "high": Color("4e7ed8"), "ice": Color("a7c7ff"), "cloud": Color("729ce8")},
+	9: {"low": Color("392b27"), "mid": Color("8f705e"), "high": Color("c9ad91"), "ice": Color("ded0bf"), "cloud": Color("d3c2ac")},
 }
 const EVENT_SPECS := [
 	{"utc": "1977-09-05T13:59:25", "title": "旅行者1号离开地球", "target": 399},
@@ -53,7 +66,12 @@ var voyager_visual: Node3D
 var voyager_map_marker: MeshInstance3D
 var camera: Camera3D
 var sun_light: DirectionalLight3D
+var camera_fill_light: DirectionalLight3D
 var map_grid: MeshInstance3D
+var world_environment: Environment
+var galactic_material: ShaderMaterial
+var star_material: ShaderMaterial
+var audience_grade := true
 var camera_distance := 0.35
 var camera_yaw := 0.0
 var camera_pitch := 0.24
@@ -70,24 +88,23 @@ func _ready() -> void:
 	var launch_unix := Time.get_unix_time_from_datetime_string("1977-09-05T13:59:25")
 	current_epoch = ephemeris.epoch_for_utc(launch_unix)
 	_create_solar_system()
+	_apply_color_grade()
 	_build_reference_trajectory()
 	_update_history_state()
 
 func _build_world() -> void:
 	var environment_node := WorldEnvironment.new()
-	var environment := Environment.new()
-	var galactic_material := ShaderMaterial.new()
+	world_environment = Environment.new()
+	galactic_material = ShaderMaterial.new()
 	galactic_material.shader = GALACTIC_SKY_SHADER
 	var sky := Sky.new()
 	sky.sky_material = galactic_material
-	environment.sky = sky
-	environment.background_mode = Environment.BG_SKY
-	environment.background_energy_multiplier = 0.72
-	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	environment.ambient_light_color = Color("172a3b")
-	environment.ambient_light_energy = 0.62
-	environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	environment_node.environment = environment
+	world_environment.sky = sky
+	world_environment.background_mode = Environment.BG_SKY
+	world_environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	world_environment.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	world_environment.adjustment_enabled = true
+	environment_node.environment = world_environment
 	add_child(environment_node)
 
 	camera = Camera3D.new()
@@ -96,6 +113,12 @@ func _build_world() -> void:
 	camera.near = 0.001
 	camera.far = 400.0
 	add_child(camera)
+	camera_fill_light = DirectionalLight3D.new()
+	camera_fill_light.name = "SpacecraftVisibilityLight"
+	camera_fill_light.light_color = Color("bfd9ef")
+	camera_fill_light.light_cull_mask = 2
+	camera_fill_light.shadow_enabled = false
+	camera.add_child(camera_fill_light)
 
 	sun_light = DirectionalLight3D.new()
 	sun_light.light_color = Color("fff3d6")
@@ -147,9 +170,9 @@ func _build_starfield() -> void:
 	var stars := MultiMeshInstance3D.new()
 	stars.name = "HipparcosJ2000Sky"
 	stars.multimesh = multimesh
-	var material := ShaderMaterial.new()
-	material.shader = STAR_SHADER
-	stars.material_override = material
+	star_material = ShaderMaterial.new()
+	star_material.shader = STAR_SHADER
+	stars.material_override = star_material
 	stars.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(stars)
 
@@ -178,6 +201,56 @@ func _star_color(color_index: float) -> Color:
 	else:
 		blue = clampf(0.5432068 * log(temperature - 10.0) - 1.1962541, 0.0, 1.0)
 	return Color(red, green, blue, 1.0)
+
+func _apply_color_grade() -> void:
+	if not world_environment:
+		return
+	if audience_grade:
+		world_environment.background_energy_multiplier = 1.08
+		world_environment.ambient_light_color = Color("6f8295")
+		world_environment.ambient_light_energy = 0.58
+		world_environment.tonemap_exposure = 1.48
+		world_environment.tonemap_white = 4.6
+		world_environment.adjustment_brightness = 1.12
+		world_environment.adjustment_contrast = 1.055
+		world_environment.adjustment_saturation = 1.10
+		sun_light.light_energy = 2.05
+		camera_fill_light.light_energy = 0.78
+		galactic_material.set_shader_parameter("display_gain", 2.15)
+		star_material.set_shader_parameter("display_gain", 1.75)
+	else:
+		world_environment.background_energy_multiplier = 0.70
+		world_environment.ambient_light_color = Color("172a3b")
+		world_environment.ambient_light_energy = 0.30
+		world_environment.tonemap_exposure = 0.95
+		world_environment.tonemap_white = 6.0
+		world_environment.adjustment_brightness = 1.0
+		world_environment.adjustment_contrast = 1.0
+		world_environment.adjustment_saturation = 1.0
+		sun_light.light_energy = 1.72
+		camera_fill_light.light_energy = 0.16
+		galactic_material.set_shader_parameter("display_gain", 0.92)
+		star_material.set_shader_parameter("display_gain", 0.90)
+	for body_id in BODY_ORDER:
+		if not body_nodes.has(body_id) or body_id == SUN:
+			continue
+		var holder := body_nodes[body_id] as Node3D
+		var surface := holder.get_node("Surface") as MeshInstance3D
+		var surface_material := surface.material_override as ShaderMaterial
+		var base_emission := 0.24 if body_id == EARTH else 0.125
+		surface_material.set_shader_parameter("emission_strength", base_emission if audience_grade else base_emission * 0.24)
+		surface_material.set_shader_parameter("rim_fill", 0.16 if audience_grade else 0.0)
+		var atmosphere := holder.get_node_or_null("Atmosphere") as MeshInstance3D
+		if atmosphere:
+			var atmosphere_material := atmosphere.material_override as ShaderMaterial
+			var base_intensity := _atmosphere_intensity(body_id)
+			atmosphere_material.set_shader_parameter("intensity", base_intensity if audience_grade else base_intensity * 0.52)
+	last_window_title_second = -1
+
+func _toggle_color_grade() -> void:
+	audience_grade = not audience_grade
+	_apply_color_grade()
+	_update_window_title()
 
 func _create_map_grid() -> MeshInstance3D:
 	var instance := MeshInstance3D.new()
@@ -231,21 +304,11 @@ func _create_solar_system() -> void:
 			atmosphere_material.shader = ATMOSPHERE_SHADER
 			var color: Color = BODY_DATA[body_id].color
 			atmosphere_material.set_shader_parameter("atmosphere_color", color.lightened(0.22))
-			atmosphere_material.set_shader_parameter("intensity", 0.92 if body_id == EARTH else 0.48)
+			atmosphere_material.set_shader_parameter("intensity", _atmosphere_intensity(body_id))
 			atmosphere.material_override = atmosphere_material
 			holder.add_child(atmosphere)
 		if body_id == 6:
-			var rings := MeshInstance3D.new()
-			var ring_mesh := TorusMesh.new()
-			ring_mesh.inner_radius = 1.35
-			ring_mesh.outer_radius = 2.25
-			ring_mesh.rings = 18
-			ring_mesh.ring_segments = 96
-			rings.mesh = ring_mesh
-			var ring_material := StandardMaterial3D.new()
-			ring_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			ring_material.albedo_color = Color(0.76, 0.69, 0.55, 0.48)
-			rings.material_override = ring_material
+			var rings := _create_saturn_rings()
 			holder.add_child(rings)
 
 		var label := Label3D.new()
@@ -288,20 +351,59 @@ func _body_material(body_id: int) -> Material:
 		return sun_material
 	var material := ShaderMaterial.new()
 	material.shader = PLANET_SHADER
-	if body_id == EARTH:
-		material.set_shader_parameter("land_color", Color("35694b"))
-		material.set_shader_parameter("highland_color", Color("9c8c5e"))
-		material.set_shader_parameter("ocean_color", Color("0a4778"))
-	else:
-		material.set_shader_parameter("land_color", color.darkened(0.28))
-		material.set_shader_parameter("highland_color", color.lightened(0.20))
-		material.set_shader_parameter("ocean_color", Color("071827").lerp(color.darkened(0.58), 0.32))
-	material.set_shader_parameter("ice_color", Color("e2f1f3"))
+	var palette: Dictionary = BODY_PALETTES[body_id]
+	material.set_shader_parameter("land_color", palette.mid)
+	material.set_shader_parameter("highland_color", palette.high)
+	material.set_shader_parameter("ocean_color", palette.low)
+	material.set_shader_parameter("ice_color", palette.ice)
+	material.set_shader_parameter("cloud_color", palette.cloud)
 	material.set_shader_parameter("seed", absf(float(body_id)) * 0.0317)
 	material.set_shader_parameter("gas_giant", 1.0 if body_id in [5, 6, 7, 8] else 0.0)
 	material.set_shader_parameter("cloud_cover", 0.82 if body_id == EARTH else (0.94 if body_id == 299 else 0.06))
 	material.set_shader_parameter("emission_strength", 0.14 if body_id == EARTH else 0.065)
 	return material
+
+func _create_saturn_rings() -> Node3D:
+	var rings := Node3D.new()
+	rings.name = "Rings"
+	var mesh := ImmediateMesh.new()
+	mesh.surface_begin(Mesh.PRIMITIVE_TRIANGLES)
+	for segment in range(192):
+		var angle0 := TAU * float(segment) / 192.0
+		var angle1 := TAU * float(segment + 1) / 192.0
+		var inner0 := Vector3(cos(angle0) * 1.12, 0.0, sin(angle0) * 1.12)
+		var inner1 := Vector3(cos(angle1) * 1.12, 0.0, sin(angle1) * 1.12)
+		var outer0 := Vector3(cos(angle0) * 2.36, 0.0, sin(angle0) * 2.36)
+		var outer1 := Vector3(cos(angle1) * 2.36, 0.0, sin(angle1) * 2.36)
+		mesh.surface_set_uv(Vector2(0.0, float(segment) / 192.0))
+		mesh.surface_add_vertex(inner0)
+		mesh.surface_set_uv(Vector2(1.0, float(segment) / 192.0))
+		mesh.surface_add_vertex(outer0)
+		mesh.surface_set_uv(Vector2(1.0, float(segment + 1) / 192.0))
+		mesh.surface_add_vertex(outer1)
+		mesh.surface_set_uv(Vector2(0.0, float(segment) / 192.0))
+		mesh.surface_add_vertex(inner0)
+		mesh.surface_set_uv(Vector2(1.0, float(segment + 1) / 192.0))
+		mesh.surface_add_vertex(outer1)
+		mesh.surface_set_uv(Vector2(0.0, float(segment + 1) / 192.0))
+		mesh.surface_add_vertex(inner1)
+	mesh.surface_end()
+	var ring_surface := MeshInstance3D.new()
+	ring_surface.mesh = mesh
+	var material := ShaderMaterial.new()
+	material.shader = SATURN_RING_SHADER
+	ring_surface.material_override = material
+	rings.add_child(ring_surface)
+	return rings
+
+func _atmosphere_intensity(body_id: int) -> float:
+	match body_id:
+		299: return 0.92
+		399: return 1.18
+		499: return 0.28
+		5, 6: return 0.32
+		7, 8: return 0.48
+		_: return 0.0
 
 func _create_voyager_model() -> Node3D:
 	var root := Node3D.new()
@@ -394,7 +496,7 @@ func _update_body_transforms() -> void:
 		if atmosphere:
 			atmosphere.scale = Vector3.ONE * visible_radius * 1.035
 		if body_id == 6:
-			var rings := holder.get_child(holder.get_child_count() - 1) as MeshInstance3D
+			var rings := holder.get_node("Rings") as Node3D
 			rings.scale = Vector3.ONE * visible_radius
 
 	var voyager_state: Dictionary = ephemeris.relative_state(VOYAGER_1, SUN, current_epoch, 1.0 / AU_KM)
@@ -478,12 +580,18 @@ func _automatic_rate_limit() -> float:
 
 func _toggle_playing() -> void:
 	playing = not playing
+	last_window_title_second = -1
+	_update_window_title()
 
 func _slower() -> void:
 	rate_index = maxi(0, rate_index - 1)
+	last_window_title_second = -1
+	_update_window_title()
 
 func _faster() -> void:
 	rate_index = mini(TIME_RATES.size() - 1, rate_index + 1)
+	last_window_title_second = -1
+	_update_window_title()
 
 func _seek_seconds(seconds: float) -> void:
 	current_epoch = clampf(current_epoch + seconds, ephemeris.start_epoch(), ephemeris.end_epoch())
@@ -524,6 +632,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_SPACE: _toggle_playing()
 			KEY_M: _toggle_view()
 			KEY_A: _toggle_auto_slow()
+			KEY_C: _toggle_color_grade()
 			KEY_HOME: _event_selected(0)
 			KEY_1: _event_selected(0)
 			KEY_2: _event_selected(1)
@@ -564,8 +673,9 @@ func _update_window_title() -> void:
 	last_window_title_second = whole_second
 	var date := Time.get_datetime_dict_from_unix_time(whole_second)
 	var state := "播放" if playing else "暂停"
-	DisplayServer.window_set_title("PhyzBox · Voyager 1 · %04d-%02d-%02d %02d:%02d UTC · %s · %s" % [
-		date.year, date.month, date.day, date.hour, date.minute, state, TIME_RATE_LABELS[rate_index]
+	var grade := "任务可视化" if audience_grade else "物理曝光"
+	DisplayServer.window_set_title("PhyzBox · Voyager 1 · %04d-%02d-%02d %02d:%02d UTC · %s · %s · %s" % [
+		date.year, date.month, date.day, date.hour, date.minute, state, TIME_RATE_LABELS[rate_index], grade
 	])
 
 func _material(albedo: Color, emission: Color, strength: float) -> StandardMaterial3D:
@@ -583,6 +693,7 @@ func _add_box(parent: Node3D, size: Vector3, position: Vector3, material: Materi
 	mesh.size = size
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
+	instance.layers = 2
 	instance.position = position
 	instance.material_override = material
 	parent.add_child(instance)
@@ -596,6 +707,7 @@ func _add_cylinder(parent: Node3D, top_radius: float, bottom_radius: float, heig
 	mesh.radial_segments = 20
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
+	instance.layers = 2
 	instance.position = position
 	instance.rotation = rotation
 	instance.material_override = material
@@ -610,6 +722,7 @@ func _add_sphere(parent: Node3D, radius: float, position: Vector3, material: Mat
 	mesh.rings = 16
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
+	instance.layers = 2
 	instance.position = position
 	instance.material_override = material
 	parent.add_child(instance)

@@ -2,6 +2,7 @@ shader_type sky;
 
 const vec3 GALACTIC_NORTH = vec3(-0.86766615, 0.45598378, 0.19807637);
 const vec3 GALACTIC_CENTER = vec3(-0.05487396, -0.48383503, 0.87343718);
+uniform float display_gain : hint_range(0.0, 4.0) = 1.0;
 
 float hash31(vec3 p) {
 	p = fract(p * 0.1031);
@@ -43,9 +44,10 @@ void sky() {
 	float fine_clouds = fbm(direction * 15.0 + vec3(4.0, 9.0, 2.0));
 	float stellar_haze = broad_plane * (0.32 + clouds * 0.68) + bulge * 1.45;
 	float dust = narrow_plane * smoothstep(0.47, 0.79, fine_clouds);
-	vec3 base = vec3(0.00035, 0.00065, 0.00125);
-	vec3 warm_haze = mix(vec3(0.010, 0.017, 0.028), vec3(0.042, 0.032, 0.026), toward_center);
+	float cool_gradient = direction.y * 0.5 + 0.5;
+	vec3 base = mix(vec3(0.0080, 0.0140, 0.0280), vec3(0.0150, 0.0250, 0.0450), cool_gradient);
+	vec3 warm_haze = mix(vec3(0.020, 0.032, 0.052), vec3(0.074, 0.052, 0.034), toward_center);
 	vec3 color = base + warm_haze * stellar_haze;
 	color *= 1.0 - dust * 0.74;
-	COLOR = color;
+	COLOR = color * display_gain;
 }

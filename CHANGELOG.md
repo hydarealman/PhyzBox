@@ -10,6 +10,9 @@
 - Removed every CanvasLayer, button, panel, picker and timeline from the historical runtime view
 - Imported 83,337 Hipparcos stars with ICRS directions, V magnitudes and B−V-derived colors
 - Added a J2000-oriented procedural Milky Way, planet surfaces, clouds and atmosphere shaders without generated textures
+- Added an audience-facing aerospace color grade with a one-key physical-exposure comparison mode
+- Gave Mars, Saturn and Neptune distinct enhanced-natural-color palettes and replaced pure black space with a restrained deep-navy field
+- Rebuilt Saturn's rings as a thin procedural annulus with band structure and the Cassini Division
 - Added auditable source/hash metadata, deterministic import tools, historical-playback tests and new visual captures
 
 ### Visual overhaul — 2026-08-05
