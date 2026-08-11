@@ -20,6 +20,7 @@ const TIME_RATES := [0.25, 1.0, 4.0, 12.0, 30.0]
 const SAVE_PATH := "user://mission.snapshot"
 const PROGRESS_PATH := "user://campaign.cfg"
 const BRIEFING_SHADER = preload("res://shaders/briefing_space.gdshader")
+const PLANET_SHADER = preload("res://shaders/planet_surface.gdshader")
 
 var simulation
 var current_mission := 0
@@ -30,15 +31,21 @@ var mission_finished := false
 var body_nodes: Dictionary = {}
 var body_visuals: Dictionary = {}
 var body_local_positions: Dictionary = {}
+var body_local_velocities: Dictionary = {}
 var trails: Dictionary = {}
 var trail_meshes: Dictionary = {}
 var prediction_mesh: MeshInstance3D
 var target_line_mesh: MeshInstance3D
+var navigation_grid: MeshInstance3D
 var selected_body_id := 0
 var target_body_id := 0
 var primary_body_id := 0
 var running := false
-var time_rate_index := 2
+var time_rate_index := 1
+var view_mode := "flight"
+var current_throttle := 0.0
+var last_thrust_direction := Vector3.ZERO
+var guidance_enabled := true
 
 var camera: Camera3D
 var camera_focus := Vector3.ZERO
@@ -61,6 +68,12 @@ var fuel_bar: ProgressBar
 var time_bar: ProgressBar
 var telemetry_panel: PanelContainer
 var telemetry_toggle: Button
+var command_dock: PanelContainer
+var flight_hud: PanelContainer
+var flight_status_label: Label
+var flight_controls_label: Label
+var flight_reticle: Label
+var view_toggle: Button
 var impulse_x: LineEdit
 var impulse_y: LineEdit
 var impulse_z: LineEdit
@@ -102,6 +115,7 @@ func _build_world() -> void:
 	camera = Camera3D.new()
 	camera.name = "OrbitCamera"
 	camera.fov = 49.0
+	camera.near = 0.008
 	add_child(camera)
 
 	var light := DirectionalLight3D.new()
@@ -125,8 +139,8 @@ func _build_world() -> void:
 	target_line_mesh.name = "TargetVector"
 	add_child(target_line_mesh)
 
-	var grid := MeshInstance3D.new()
-	grid.name = "NavigationGrid"
+	navigation_grid = MeshInstance3D.new()
+	navigation_grid.name = "NavigationGrid"
 	var grid_mesh := ImmediateMesh.new()
 	grid_mesh.surface_begin(Mesh.PRIMITIVE_LINES)
 	for i in range(-10, 11):
@@ -136,13 +150,13 @@ func _build_world() -> void:
 		grid_mesh.surface_add_vertex(Vector3(-5.0, -0.012, p))
 		grid_mesh.surface_add_vertex(Vector3(5.0, -0.012, p))
 	grid_mesh.surface_end()
-	grid.mesh = grid_mesh
+	navigation_grid.mesh = grid_mesh
 	var grid_material := StandardMaterial3D.new()
 	grid_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	grid_material.albedo_color = Color(0.08, 0.32, 0.46, 0.10)
 	grid_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	grid.material_override = grid_material
-	add_child(grid)
+	navigation_grid.material_override = grid_material
+	add_child(navigation_grid)
 
 	_build_starfield()
 	_update_camera_transform()
@@ -205,6 +219,11 @@ func _build_ui() -> void:
 	var top_spacer := Control.new()
 	top_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top_row.add_child(top_spacer)
+
+	view_toggle = _make_button("M  星图规划", "ViewToggle", _toggle_view_mode)
+	view_toggle.custom_minimum_size.x = 150.0
+	view_toggle.tooltip_text = "在直接驾驶与轨道规划之间切换"
+	top_row.add_child(view_toggle)
 
 	mission_picker = OptionButton.new()
 	mission_picker.name = "MissionPicker"
@@ -269,19 +288,19 @@ func _build_ui() -> void:
 	result_label.modulate = Color("9cefd3")
 	layer.add_child(result_label)
 
-	var dock := PanelContainer.new()
-	dock.name = "CommandDock"
-	dock.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	dock.offset_left = -455.0
-	dock.offset_top = -215.0
-	dock.offset_right = 455.0
-	dock.offset_bottom = -20.0
-	dock.add_theme_stylebox_override("panel", _panel_style(Color(0.018, 0.032, 0.048, 0.94), Color(0.19, 0.50, 0.62, 0.72), 14))
-	layer.add_child(dock)
+	command_dock = PanelContainer.new()
+	command_dock.name = "CommandDock"
+	command_dock.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	command_dock.offset_left = -455.0
+	command_dock.offset_top = -215.0
+	command_dock.offset_right = 455.0
+	command_dock.offset_bottom = -20.0
+	command_dock.add_theme_stylebox_override("panel", _panel_style(Color(0.018, 0.032, 0.048, 0.94), Color(0.19, 0.50, 0.62, 0.72), 14))
+	layer.add_child(command_dock)
 
 	var dock_box := VBoxContainer.new()
 	dock_box.add_theme_constant_override("separation", 9)
-	dock.add_child(dock_box)
+	command_dock.add_child(dock_box)
 
 	var dock_header := HBoxContainer.new()
 	dock_box.add_child(dock_header)
@@ -303,25 +322,27 @@ func _build_ui() -> void:
 	controls_row.add_theme_constant_override("separation", 8)
 	dock_box.add_child(controls_row)
 
-	for axis in ["X", "Y", "Z"]:
+	var maneuver_axes := ["PRO", "RAD", "NRM"]
+	for axis_index in range(3):
+		var axis: String = maneuver_axes[axis_index]
 		var column := VBoxContainer.new()
 		column.custom_minimum_size.x = 92.0
 		var axis_label := Label.new()
-		axis_label.text = "ΔV%s" % axis
+		axis_label.text = axis
 		axis_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		axis_label.modulate = TEXT_MUTED
 		axis_label.add_theme_font_size_override("font_size", 11)
 		column.add_child(axis_label)
 		var edit := LineEdit.new()
-		edit.name = "Impulse%s" % axis
+		edit.name = "Impulse%s" % ["X", "Y", "Z"][axis_index]
 		edit.text = "0.000"
 		edit.alignment = HORIZONTAL_ALIGNMENT_CENTER
-		edit.tooltip_text = "惯性坐标速度增量，单位 AU/年"
+		edit.tooltip_text = "顺行 / 径向 / 法向速度增量，单位 AU/年"
 		_style_input(edit)
 		column.add_child(edit)
 		controls_row.add_child(column)
-		if axis == "X": impulse_x = edit
-		elif axis == "Y": impulse_y = edit
+		if axis_index == 0: impulse_x = edit
+		elif axis_index == 1: impulse_y = edit
 		else: impulse_z = edit
 
 	var time_column := VBoxContainer.new()
@@ -333,6 +354,7 @@ func _build_ui() -> void:
 	burn_time_label.add_theme_font_size_override("font_size", 11)
 	time_column.add_child(burn_time_label)
 	burn_time = LineEdit.new()
+	burn_time.name = "BurnTime"
 	burn_time.text = "0.0000"
 	burn_time.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	burn_time.tooltip_text = "绝对仿真时刻，不能早于当前时间"
@@ -340,8 +362,8 @@ func _build_ui() -> void:
 	time_column.add_child(burn_time)
 	controls_row.add_child(time_column)
 
-	var guidance_button := _make_button("导航解", "GuidanceButton", _apply_guidance)
-	guidance_button.tooltip_text = "载入通过自动验证的参考解；不会自动执行"
+	var guidance_button := _make_button("航向辅助", "GuidanceButton", _apply_guidance)
+	guidance_button.tooltip_text = "显示目标连线与相对运动信息，不提供答案"
 	guidance_button.modulate = Color("b9dce5")
 	controls_row.add_child(guidance_button)
 	controls_row.add_child(_make_button("预演", "PredictButton", _predict_maneuver))
@@ -364,6 +386,56 @@ func _build_ui() -> void:
 	action_row.add_child(_make_button("+ 时间", "FasterButton", _faster))
 	action_row.add_child(_make_button("全局 H", "HomeCameraButton", _focus_system))
 	action_row.add_child(_make_button("目标 T", "TargetCameraButton", _focus_target))
+
+	flight_hud = PanelContainer.new()
+	flight_hud.name = "FlightHUD"
+	flight_hud.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	flight_hud.offset_left = -410.0
+	flight_hud.offset_top = -132.0
+	flight_hud.offset_right = 410.0
+	flight_hud.offset_bottom = -22.0
+	flight_hud.add_theme_stylebox_override("panel", _panel_style(Color(0.014, 0.028, 0.040, 0.90), Color(0.12, 0.48, 0.58, 0.68), 12))
+	layer.add_child(flight_hud)
+	var flight_row := HBoxContainer.new()
+	flight_row.add_theme_constant_override("separation", 24)
+	flight_hud.add_child(flight_row)
+	var flight_mode_box := VBoxContainer.new()
+	flight_mode_box.custom_minimum_size.x = 285.0
+	flight_row.add_child(flight_mode_box)
+	var flight_mode_title := Label.new()
+	flight_mode_title.text = "MANUAL FLIGHT  /  有限推力驾驶"
+	flight_mode_title.modulate = ACCENT
+	flight_mode_title.add_theme_font_size_override("font_size", 12)
+	flight_mode_box.add_child(flight_mode_title)
+	flight_status_label = Label.new()
+	flight_status_label.name = "FlightStatus"
+	flight_status_label.text = "COAST"
+	flight_status_label.modulate = Color("d9f7ff")
+	flight_status_label.add_theme_font_size_override("font_size", 20)
+	flight_mode_box.add_child(flight_status_label)
+	flight_controls_label = Label.new()
+	flight_controls_label.text = "W/S 顺逆行   A/D 径向   Q/E 法向   Shift 全推力   Ctrl 制动"
+	flight_controls_label.modulate = TEXT_MUTED
+	flight_controls_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	flight_controls_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	flight_controls_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	flight_controls_label.add_theme_font_size_override("font_size", 13)
+	flight_row.add_child(flight_controls_label)
+
+	flight_reticle = Label.new()
+	flight_reticle.name = "FlightReticle"
+	flight_reticle.text = "＋"
+	flight_reticle.set_anchors_preset(Control.PRESET_CENTER)
+	flight_reticle.offset_left = -18.0
+	flight_reticle.offset_top = -18.0
+	flight_reticle.offset_right = 18.0
+	flight_reticle.offset_bottom = 18.0
+	flight_reticle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	flight_reticle.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	flight_reticle.modulate = Color(0.36, 0.90, 0.94, 0.62)
+	flight_reticle.add_theme_font_size_override("font_size", 22)
+	flight_reticle.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(flight_reticle)
 
 	telemetry_toggle = _make_button("专业数据  +", "TelemetryToggle", _toggle_telemetry)
 	telemetry_toggle.position = Vector2(0.0, 0.0)
@@ -578,10 +650,25 @@ func _make_meter(caption: String, color: Color) -> ProgressBar:
 func _process(delta: float) -> void:
 	if running and not mission_finished:
 		var years := delta * 0.03 * float(TIME_RATES[time_rate_index])
-		var report: Dictionary = simulation.advance(years)
+		var report: Dictionary
+		if view_mode == "flight":
+			var thrust_direction := _flight_thrust_direction()
+			current_throttle = _flight_throttle(thrust_direction)
+			if current_throttle > 0.001:
+				last_thrust_direction = thrust_direction
+			var physics_thrust := _to_physics(thrust_direction)
+			report = simulation.advance_controlled(
+				years, physics_thrust.x, physics_thrust.y, physics_thrust.z, current_throttle
+			)
+			if bool(report.get("fuel_depleted", false)):
+				result_label.text = "推进剂预算耗尽，飞船已转入惯性滑行。"
+		else:
+			current_throttle = 0.0
+			report = simulation.advance(years)
 		if bool(report.get("burn_executed", false)):
 			result_label.text = "机动节点已执行。正在沿新轨迹推进。"
 	_update_bodies()
+	_update_ship_effects()
 	_update_telemetry()
 	_update_camera(delta)
 
@@ -590,20 +677,117 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.button_index == MOUSE_BUTTON_LEFT or event.button_index == MOUSE_BUTTON_RIGHT:
 			camera_dragging = event.pressed
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			camera_distance = max(1.2, camera_distance * 0.86)
+			camera_distance = max(0.28 if view_mode == "flight" else 1.2, camera_distance * 0.86)
 		elif event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			camera_distance = min(24.0, camera_distance * 1.16)
+			camera_distance = min(1.8 if view_mode == "flight" else 24.0, camera_distance * 1.16)
 	elif event is InputEventMouseMotion and camera_dragging:
 		camera_yaw -= event.relative.x * 0.007
 		camera_pitch = clamp(camera_pitch + event.relative.y * 0.006, 0.12, 1.35)
 	elif event is InputEventKey and event.pressed and not event.echo:
 		match event.physical_keycode:
 			KEY_SPACE: _toggle_running()
+			KEY_M: _toggle_view_mode()
 			KEY_EQUAL, KEY_KP_ADD: _faster()
 			KEY_MINUS, KEY_KP_SUBTRACT: _slower()
 			KEY_F: _focus_player()
 			KEY_T: _focus_target()
 			KEY_H: _focus_system()
+
+func _toggle_view_mode() -> void:
+	if overlay.visible:
+		return
+	_set_view_mode("map" if view_mode == "flight" else "flight")
+
+func _set_view_mode(mode: String) -> void:
+	view_mode = "map" if mode == "map" else "flight"
+	var in_flight := view_mode == "flight"
+	command_dock.visible = not in_flight
+	flight_hud.visible = in_flight
+	flight_reticle.visible = in_flight
+	navigation_grid.visible = not in_flight
+	prediction_mesh.visible = not in_flight
+	telemetry_toggle.visible = not in_flight
+	if in_flight:
+		telemetry_panel.visible = false
+		telemetry_toggle.text = "专业数据  +"
+		view_toggle.text = "M  星图规划"
+		camera_focus_body_id = selected_body_id
+		camera_distance = 0.52
+		camera_yaw = 0.0
+		camera_pitch = 0.24
+		running = not mission_finished
+	else:
+		view_toggle.text = "M  返回驾驶"
+		camera_focus_body_id = primary_body_id
+		_fit_camera_to_system()
+		running = false
+	if time_button:
+		time_button.text = "Ⅱ  暂停" if running else "▶  推进"
+	target_line_mesh.visible = guidance_enabled or not in_flight
+	result_label.text = "直接驾驶：有限推力与燃料实时进入物理积分。" if in_flight else "星图暂停：规划机动节点后按 M 返回驾驶。"
+
+func _flight_thrust_direction() -> Vector3:
+	var frame := _orbital_frame()
+	if frame.is_empty():
+		return Vector3.ZERO
+	var prograde: Vector3 = frame[0]
+	var radial: Vector3 = frame[1]
+	var normal: Vector3 = frame[2]
+	if Input.is_physical_key_pressed(KEY_CTRL):
+		return -prograde
+	var command := Vector3.ZERO
+	if Input.is_physical_key_pressed(KEY_W): command += prograde
+	if Input.is_physical_key_pressed(KEY_S): command -= prograde
+	if Input.is_physical_key_pressed(KEY_D): command += radial
+	if Input.is_physical_key_pressed(KEY_A): command -= radial
+	if Input.is_physical_key_pressed(KEY_E): command += normal
+	if Input.is_physical_key_pressed(KEY_Q): command -= normal
+	return command.normalized() if command.length_squared() > 1.0e-8 else Vector3.ZERO
+
+func _flight_throttle(direction: Vector3) -> float:
+	if direction.is_zero_approx():
+		return 0.0
+	return 1.0 if Input.is_physical_key_pressed(KEY_SHIFT) else 0.42
+
+func _orbital_frame() -> Array:
+	if not body_local_positions.has(selected_body_id) or not body_local_velocities.has(selected_body_id):
+		return []
+	var radial: Vector3 = Vector3(body_local_positions[selected_body_id]).normalized()
+	var prograde: Vector3 = Vector3(body_local_velocities[selected_body_id]).normalized()
+	if radial.is_zero_approx() or prograde.is_zero_approx():
+		return []
+	var normal := radial.cross(prograde).normalized()
+	if normal.is_zero_approx():
+		return []
+	prograde = normal.cross(radial).normalized()
+	return [prograde, radial, normal]
+
+func _orbital_up_for(body_id: int) -> Vector3:
+	if body_local_positions.has(body_id):
+		var radial := Vector3(body_local_positions[body_id]).normalized()
+		if not radial.is_zero_approx():
+			return radial
+	return Vector3.UP
+
+func _to_physics(world_vector: Vector3) -> Vector3:
+	return Vector3(world_vector.x, -world_vector.z, world_vector.y)
+
+func _maneuver_delta_world() -> Vector3:
+	var frame := _orbital_frame()
+	if frame.is_empty():
+		return Vector3.ZERO
+	var local_delta := Vector3(_number(impulse_x), _number(impulse_y), _number(impulse_z))
+	return Vector3(frame[0]) * local_delta.x + Vector3(frame[1]) * local_delta.y + Vector3(frame[2]) * local_delta.z
+
+func _inertial_world_to_orbital(world_delta: Vector3) -> Vector3:
+	var frame := _orbital_frame()
+	if frame.is_empty():
+		return Vector3.ZERO
+	return Vector3(
+		world_delta.dot(Vector3(frame[0])),
+		world_delta.dot(Vector3(frame[1])),
+		world_delta.dot(Vector3(frame[2]))
+	)
 
 func _mission_selected(index: int) -> void:
 	if index > unlocked_mission:
@@ -614,6 +798,7 @@ func _mission_selected(index: int) -> void:
 
 func _load_mission(index: int, show_briefing := true) -> void:
 	current_mission = clampi(index, 0, Campaign.MISSIONS.size() - 1)
+	time_rate_index = 1
 	running = false
 	mission_finished = false
 	if time_button:
@@ -630,10 +815,12 @@ func _load_mission(index: int, show_briefing := true) -> void:
 	_clear_visuals()
 	_update_mission_text()
 	_update_bodies()
-	_fit_camera_to_system()
 	_predict_maneuver(false)
-	result_label.text = "先查看任务简报，再使用导航建议完成第一次规划。"
+	_set_view_mode("flight")
+	result_label.text = "按 W/S 沿轨道顺逆行推进；按 M 进入星图规划。"
 	if show_briefing:
+		running = false
+		time_button.text = "▶  推进"
 		_show_briefing()
 
 func _update_mission_text() -> void:
@@ -688,21 +875,13 @@ func _overlay_action_pressed() -> void:
 			_load_mission(current_mission)
 		_:
 			overlay.visible = false
-			result_label.text = "点击“导航建议”，再点击“预测轨迹”查看可行路线。"
+			_set_view_mode("flight")
+			result_label.text = "手动驾驶已接管。W/S 顺逆行，A/D 径向，Q/E 法向，M 打开星图。"
 
 func _apply_guidance() -> void:
-	if simulation.get_time() > 1.0e-8:
-		result_label.text = "导航建议以任务起点为基准。请点击“重开任务”后再应用。"
-		return
-	var mission: Dictionary = Campaign.mission(current_mission)
-	var hint: Vector3 = mission.hint
-	_set_impulse(hint)
-	burn_time.text = "%.4f" % float(mission.hint_time)
-	_predict_maneuver(false)
-	if hint.is_zero_approx():
-		result_label.text = "导航建议：暂不点火，先观察自然演化，然后启动时间。"
-	else:
-		result_label.text = "已填入可行机动。黄色线是预测结果；确认后点击“提交节点”。"
+	guidance_enabled = not guidance_enabled
+	target_line_mesh.visible = guidance_enabled or view_mode == "map"
+	result_label.text = "航向辅助已开启：只显示目标方向与相对运动，不提供机动答案。" if guidance_enabled else "航向辅助已关闭。"
 
 func _clear_visuals() -> void:
 	for node in body_nodes.values():
@@ -712,6 +891,7 @@ func _clear_visuals() -> void:
 	body_nodes.clear()
 	body_visuals.clear()
 	body_local_positions.clear()
+	body_local_velocities.clear()
 	trail_meshes.clear()
 	trails.clear()
 	prediction_mesh.mesh = null
@@ -720,21 +900,27 @@ func _clear_visuals() -> void:
 func _update_bodies() -> void:
 	var bodies: Array = simulation.get_bodies()
 	var origin := Vector3.ZERO
+	var origin_velocity := Vector3.ZERO
 	for data in bodies:
 		if int(data.id) == primary_body_id:
 			origin = _v3(data.position)
+			origin_velocity = _v3(data.velocity)
 	for data in bodies:
 		var id := int(data.id)
 		if not body_nodes.has(id):
 			_create_body_node(data)
 		var local_position := _v3(data.position) - origin
+		var local_velocity := _v3(data.velocity) - origin_velocity
 		body_local_positions[id] = local_position
+		body_local_velocities[id] = local_velocity
 		body_nodes[id].position = local_position
 		if body_visuals.has(id) and int(data.kind) == 6:
-			var velocity_direction := _v3(data.velocity).normalized()
-			if velocity_direction.length_squared() > 0.001:
+			var facing_direction := local_velocity.normalized()
+			if id == selected_body_id and current_throttle > 0.001 and not last_thrust_direction.is_zero_approx():
+				facing_direction = last_thrust_direction
+			if facing_direction.length_squared() > 0.001:
 				var visual: Node3D = body_visuals[id]
-				visual.look_at(visual.global_position + velocity_direction, Vector3.UP)
+				visual.look_at(visual.global_position + facing_direction, _orbital_up_for(id))
 		if not trails.has(id):
 			trails[id] = PackedVector3Array()
 		var points: PackedVector3Array = trails[id]
@@ -773,7 +959,9 @@ func _create_body_node(data: Dictionary) -> void:
 	elif str(data.name).contains("Station"):
 		visual = _create_station_visual(radius)
 	else:
-		visual = _create_celestial_visual(radius, color, id == primary_body_id, int(data.kind))
+		visual = _create_celestial_visual(
+			radius, color, id == primary_body_id, int(data.kind), str(data.name), id
+		)
 	visual.name = "SpacecraftVisual" if int(data.kind) == 6 else "BodyVisual"
 	holder.add_child(visual)
 	body_visuals[id] = visual
@@ -835,13 +1023,31 @@ func _create_spacecraft_visual(radius: float, is_player: bool, is_target: bool) 
 		for y_sign in [-1.0, 1.0]:
 			var nozzle_position := Vector3(float(x_sign) * 0.022, float(y_sign) * 0.020, 0.165)
 			_add_cylinder(root, 0.011, 0.016, 0.040, nozzle_position, Vector3(PI * 0.5, 0.0, 0.0), dark_hull)
-			_add_cylinder(root, 0.002, 0.010, 0.050, nozzle_position + Vector3(0.0, 0.0, 0.042), Vector3(PI * 0.5, 0.0, 0.0), cyan_light)
+			var plume := _add_cylinder(
+				root, 0.001, 0.010, 0.060,
+				nozzle_position + Vector3(0.0, 0.0, 0.047),
+				Vector3(PI * 0.5, 0.0, 0.0), cyan_light
+			)
+			plume.name = "DrivePlume"
+			plume.visible = false
+			if is_player:
+				plume.add_to_group("player_drive_plume")
 
 	for pod_x in [-0.052, 0.052]:
 		_add_box(root, Vector3(0.022, 0.022, 0.040), Vector3(pod_x, 0.0, -0.070), dark_hull)
 
 	var status_material := cyan_light if is_player else (amber_light if is_target else cyan_light)
 	_add_sphere(root, 0.009, Vector3(0.0, 0.052, -0.125), status_material)
+	if is_player:
+		var drive_light := OmniLight3D.new()
+		drive_light.name = "DriveLight"
+		drive_light.position = Vector3(0.0, 0.0, 0.22)
+		drive_light.light_color = Color("50dcff")
+		drive_light.omni_range = 0.85
+		drive_light.light_energy = 0.0
+		drive_light.visible = false
+		drive_light.add_to_group("player_drive_light")
+		root.add_child(drive_light)
 	return root
 
 func _create_station_visual(radius: float) -> Node3D:
@@ -865,20 +1071,68 @@ func _create_station_visual(radius: float) -> Node3D:
 	_add_sphere(root, 0.014, Vector3(0.0, 0.050, 0.0), signal_material)
 	return root
 
-func _create_celestial_visual(radius: float, color: Color, is_primary: bool, kind: int) -> Node3D:
+func _create_celestial_visual(
+	radius: float, color: Color, is_primary: bool, kind: int, body_name: String, body_id: int
+) -> Node3D:
 	var root := Node3D.new()
 	var sphere := SphereMesh.new()
 	sphere.radius = radius
 	sphere.height = radius * 2.0
 	sphere.radial_segments = 36
 	sphere.rings = 20
-	var material := _space_material(color.darkened(0.10), color, 1.45 if is_primary else 0.28)
+	var material: Material
+	if kind == 1:
+		var planet_material := ShaderMaterial.new()
+		planet_material.shader = PLANET_SHADER
+		planet_material.set_shader_parameter("land_color", color.darkened(0.28))
+		planet_material.set_shader_parameter("highland_color", color.lightened(0.18))
+		planet_material.set_shader_parameter("ocean_color", Color("071c2d").lerp(color.darkened(0.5), 0.35))
+		planet_material.set_shader_parameter("ice_color", Color("d8ecf2"))
+		planet_material.set_shader_parameter("seed", float(body_id) * 1.713)
+		planet_material.set_shader_parameter("gas_giant", 1.0 if body_name == "Giant" else 0.0)
+		material = planet_material
+	else:
+		material = _space_material(color.darkened(0.10), color, 1.45 if is_primary else 0.28)
 	var body := MeshInstance3D.new()
 	body.mesh = sphere
 	body.material_override = material
 	if kind == 5:
 		body.scale = Vector3(1.18, 0.82, 0.96)
 	root.add_child(body)
+	if kind == 1:
+		var atmosphere_mesh := SphereMesh.new()
+		atmosphere_mesh.radius = radius * 1.055
+		atmosphere_mesh.height = radius * 2.11
+		atmosphere_mesh.radial_segments = 32
+		atmosphere_mesh.rings = 18
+		var atmosphere := MeshInstance3D.new()
+		atmosphere.name = "ProceduralAtmosphere"
+		atmosphere.mesh = atmosphere_mesh
+		var atmosphere_material := StandardMaterial3D.new()
+		atmosphere_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		atmosphere_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		atmosphere_material.cull_mode = BaseMaterial3D.CULL_FRONT
+		atmosphere_material.albedo_color = Color(color.r, color.g, color.b, 0.13)
+		atmosphere_material.emission_enabled = true
+		atmosphere_material.emission = color * 0.22
+		atmosphere.material_override = atmosphere_material
+		root.add_child(atmosphere)
+		if body_name == "Cinder":
+			var ring_mesh := TorusMesh.new()
+			ring_mesh.inner_radius = radius * 1.38
+			ring_mesh.outer_radius = radius * 1.46
+			ring_mesh.rings = 10
+			ring_mesh.ring_segments = 64
+			var planet_ring := MeshInstance3D.new()
+			planet_ring.name = "CinderRing"
+			planet_ring.mesh = ring_mesh
+			planet_ring.rotation_degrees = Vector3(67.0, 8.0, 0.0)
+			var ring_material := StandardMaterial3D.new()
+			ring_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			ring_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			ring_material.albedo_color = Color(0.58, 0.72, 0.77, 0.32)
+			planet_ring.material_override = ring_material
+			root.add_child(planet_ring)
 	if is_primary:
 		var halo_sphere := SphereMesh.new()
 		halo_sphere.radius = radius * 1.18
@@ -992,9 +1246,10 @@ func _predict_maneuver(show_message := true) -> void:
 	var definition: Dictionary = simulation.get_mission_definition()
 	var duration: float = maxf(0.08, float(definition.deadline) - simulation.get_time())
 	var node_time: float = maxf(simulation.get_time(), _number(burn_time))
+	var physics_delta := _to_physics(_maneuver_delta_world())
 	var prediction: Array = simulation.predict(
 		selected_body_id,
-		_number(impulse_x), _number(impulse_y), _number(impulse_z),
+		physics_delta.x, physics_delta.y, physics_delta.z,
 		node_time, duration, max(0.002, duration / 280.0)
 	)
 	var points := PackedVector3Array()
@@ -1009,17 +1264,19 @@ func _predict_maneuver(show_message := true) -> void:
 		result_label.text = "预测完成：黄色轨迹包含%d个采样点。" % points.size()
 
 func _execute_maneuver() -> void:
+	var physics_delta := _to_physics(_maneuver_delta_world())
 	var accepted: bool = simulation.apply_impulse(
-		selected_body_id, _number(impulse_x), _number(impulse_y), _number(impulse_z)
+		selected_body_id, physics_delta.x, physics_delta.y, physics_delta.z
 	)
 	result_label.text = "立即点火完成。" if accepted else "点火被拒绝：燃料不足、数值无效或已有节点占用预算。"
 	if accepted:
 		_predict_maneuver(false)
 
 func _commit_maneuver() -> void:
+	var physics_delta := _to_physics(_maneuver_delta_world())
 	var accepted: bool = simulation.schedule_impulse(
 		selected_body_id, _number(burn_time),
-		_number(impulse_x), _number(impulse_y), _number(impulse_z)
+		physics_delta.x, physics_delta.y, physics_delta.z
 	)
 	result_label.text = "机动节点已提交。启动时间后会在指定时刻自动执行。" if accepted else "节点无效：检查执行时刻和delta-v预算。"
 
@@ -1139,7 +1396,7 @@ func _load_snapshot() -> void:
 		if bool(scheduled.get("active", false)):
 			burn_time.text = "%.4f" % float(scheduled.time)
 			var delta_values = scheduled.delta_velocity
-			_set_impulse(Vector3(float(delta_values[0]), float(delta_values[1]), float(delta_values[2])))
+			_set_impulse(_inertial_world_to_orbital(_v3(delta_values)))
 		_clear_visuals()
 		_update_bodies()
 		_predict_maneuver(false)
@@ -1205,6 +1462,18 @@ func _update_camera(delta: float) -> void:
 	_update_camera_transform()
 
 func _update_camera_transform() -> void:
+	if view_mode == "flight":
+		var frame := _orbital_frame()
+		if not frame.is_empty():
+			var prograde := Vector3(frame[0])
+			var radial := Vector3(frame[1])
+			var normal := Vector3(frame[2])
+			var right := normal.cross(prograde).normalized()
+			var horizontal := cos(camera_pitch) * camera_distance
+			var back := (-prograde * cos(camera_yaw) + right * sin(camera_yaw)).normalized()
+			camera.position = camera_focus + back * horizontal + radial * sin(camera_pitch) * camera_distance
+			camera.look_at(camera_focus + prograde * 0.13, radial)
+			return
 	var horizontal := cos(camera_pitch) * camera_distance
 	var offset := Vector3(
 		sin(camera_yaw) * horizontal,
@@ -1213,6 +1482,32 @@ func _update_camera_transform() -> void:
 	)
 	camera.position = camera_focus + offset
 	camera.look_at(camera_focus, Vector3.UP)
+
+func _update_ship_effects() -> void:
+	var burning := current_throttle > 0.001 and view_mode == "flight" and running
+	var pulse := 0.92 + 0.08 * sin(float(Time.get_ticks_msec()) * 0.026)
+	for plume in get_tree().get_nodes_in_group("player_drive_plume"):
+		if plume is MeshInstance3D:
+			plume.visible = burning
+			plume.scale = Vector3(1.0, (0.45 + current_throttle * 1.75) * pulse, 1.0)
+	for drive_light in get_tree().get_nodes_in_group("player_drive_light"):
+		if drive_light is OmniLight3D:
+			drive_light.visible = burning
+			drive_light.light_energy = current_throttle * (2.8 + pulse)
+	if not flight_status_label:
+		return
+	var definition: Dictionary = simulation.get_mission_definition()
+	var evaluation: Dictionary = simulation.evaluate_mission()
+	var budget := float(definition.delta_v_budget)
+	var remaining := maxf(0.0, budget - float(definition.delta_v_spent) - float(definition.get("delta_v_reserved", 0.0)))
+	var speed := Vector3(body_local_velocities.get(selected_body_id, Vector3.ZERO)).length()
+	flight_status_label.text = "%s  %3d%%     V %.3f     ΔV %.3f" % [
+		("BURN" if burning else "COAST"), roundi(current_throttle * 100.0), speed, remaining
+	]
+	flight_status_label.modulate = AMBER if burning else Color("d9f7ff")
+	flight_controls_label.text = "RANGE %.3f AU   REL-V %.3f   ·   W/S A/D Q/E   SHIFT 全推力   M 星图" % [
+		float(evaluation.distance), float(evaluation.relative_speed)
+	]
 
 func _set_impulse(value: Vector3) -> void:
 	impulse_x.text = "%.3f" % value.x

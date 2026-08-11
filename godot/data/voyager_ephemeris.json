@@ -1,0 +1,92 @@
+{
+  "format": "PHYZEPH2",
+  "reference_frame": "J2000",
+  "observer": "SOLAR SYSTEM BARYCENTER",
+  "aberration_correction": "NONE",
+  "position_unit": "km",
+  "velocity_unit": "km/s",
+  "coverage_utc": [
+    "1977-08-20T00:00:00",
+    "2030-12-31T00:00:00"
+  ],
+  "sample_count": 10988,
+  "runtime_sha256": "9ef5ab91c779d99b955e36af1fb545beca706e33531425501af995c5586aeb6c",
+  "bodies": [
+    {
+      "naif_id": 10,
+      "name": "Sun"
+    },
+    {
+      "naif_id": 199,
+      "name": "Mercury"
+    },
+    {
+      "naif_id": 299,
+      "name": "Venus"
+    },
+    {
+      "naif_id": 399,
+      "name": "Earth"
+    },
+    {
+      "naif_id": 301,
+      "name": "Moon"
+    },
+    {
+      "naif_id": 499,
+      "name": "Mars"
+    },
+    {
+      "naif_id": 5,
+      "name": "Jupiter"
+    },
+    {
+      "naif_id": 6,
+      "name": "Saturn"
+    },
+    {
+      "naif_id": 7,
+      "name": "Uranus"
+    },
+    {
+      "naif_id": 8,
+      "name": "Neptune"
+    },
+    {
+      "naif_id": 9,
+      "name": "Pluto"
+    },
+    {
+      "naif_id": -31,
+      "name": "Voyager 1"
+    },
+    {
+      "naif_id": -32,
+      "name": "Voyager 2"
+    }
+  ],
+  "sources": [
+    {
+      "file": "de440s.bsp",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp",
+      "sha256": "c1c7feeab882263fc493a9d5a5b2ddd71b54826cdf65d8d17a76126b260a49f2"
+    },
+    {
+      "file": "naif0012.tls",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/lsk/naif0012.tls",
+      "sha256": "678e32bdb5a744117a467cd9601cd6b373f0e9bc9bbde1371d5eee39600a039b"
+    },
+    {
+      "file": "Voyager_1.a54206u_V0.2_merged.bsp",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_1.a54206u_V0.2_merged.bsp",
+      "sha256": "47c6f2be03668b50a1efb5f96978a2b68b2b501dae6f585841b1569baa3f4311"
+    },
+    {
+      "file": "Voyager_2.m05016u.merged.bsp",
+      "url": "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_2.m05016u.merged.bsp",
+      "sha256": "ce66cba12cf77bf3a1097f44142ef978f46656788ed08f9052238a102ed2e706"
+    }
+  ],
+  "generated_utc": "2026-08-11T04:54:52+00:00",
+  "generator": "tools/import_voyager_ephemeris.py"
+}

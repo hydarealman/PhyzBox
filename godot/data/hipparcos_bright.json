@@ -1,0 +1,19 @@
+{
+  "format": "PHYZSTAR1",
+  "generated_utc": "2026-08-11T05:22:54.117076+00:00",
+  "source": {
+    "catalogue": "The Hipparcos Main Catalogue, ESA SP-1200 (1997)",
+    "url": "https://heasarc.gsfc.nasa.gov/xamin/vo/tap/sync?request=doQuery&lang=ADQL&format=text&query=select+ra_deg%2Cdec_deg%2Cvmag%2Cbv_color%2Cpm_ra%2Cpm_dec+from+hipparcos+where+vmag+%3C%3D+9.0",
+    "sha256": "6e7fb530cf00e5f52e7565e88273bcfc41d2aedc048ea072a0b83110e4658fc4",
+    "credit": "ESA",
+    "archive": "NASA HEASARC TAP service, table hipparcos"
+  },
+  "selection": {
+    "maximum_v_magnitude": 9.0,
+    "coordinate_frame": "ICRS / J2000 equator",
+    "position_epoch": 2000.0,
+    "color": "Johnson B-V colour index"
+  },
+  "star_count": 83337,
+  "runtime_sha256": "00848cf859b6220c48205eccb71aa12017a7674dce31bbbad3d80764361c6ba2"
+}

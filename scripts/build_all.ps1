@@ -58,6 +58,8 @@ try {
 
     & $godotConsole --headless --path .\godot --script res://scripts/test_runner.gd
     if ($LASTEXITCODE -ne 0) { throw "Godot integration validation failed." }
+    & $godotConsole --headless --path .\godot --script res://scripts/voyager_test_runner.gd
+    if ($LASTEXITCODE -ne 0) { throw "Voyager historical-playback validation failed." }
     & $godotConsole --headless --path .\godot --script res://scripts/ui_smoke_runner.gd
     if ($LASTEXITCODE -ne 0) { throw "Godot cockpit UI validation failed." }
     & $godotConsole --headless --path .\godot --quit-after 10
@@ -68,6 +70,10 @@ try {
         $exportPath = Join-Path $root "dist\PhyzBox.exe"
         & $godotConsole --headless --path .\godot --export-release "Windows Desktop" $exportPath
         if ($LASTEXITCODE -ne 0) { throw "Windows game export failed." }
+        $exportData = Join-Path $root "dist\PhyzBox.pck"
+        if (-not (Test-Path -LiteralPath $exportData) -or (Get-Item -LiteralPath $exportData).Length -lt 8000000) {
+            throw "Exported game is missing packaged ephemeris or star-catalogue data."
+        }
         & $exportPath --headless --quit-after 10
         if ($LASTEXITCODE -ne 0) { throw "Exported game smoke test failed." }
     }

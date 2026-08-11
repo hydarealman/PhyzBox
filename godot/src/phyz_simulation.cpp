@@ -15,6 +15,7 @@ namespace {
 using phyz::engine::BodyDefinition;
 using phyz::engine::BodyId;
 using phyz::engine::BodyKind;
+using phyz::engine::ConstantAcceleration;
 using phyz::engine::PairwiseGravity;
 using phyz::engine::GravityLaw;
 using phyz::engine::UnitSystem;
@@ -49,6 +50,7 @@ PhyzSimulation::PhyzSimulation() {
 void PhyzSimulation::_bind_methods() {
     ClassDB::bind_method(D_METHOD("load_mission", "mission_index"), &PhyzSimulation::load_mission);
     ClassDB::bind_method(D_METHOD("advance", "years"), &PhyzSimulation::advance);
+    ClassDB::bind_method(D_METHOD("advance_controlled", "years", "x", "y", "z", "throttle"), &PhyzSimulation::advance_controlled);
     ClassDB::bind_method(D_METHOD("apply_impulse", "body_id", "x", "y", "z"), &PhyzSimulation::apply_impulse);
     ClassDB::bind_method(D_METHOD("schedule_impulse", "body_id", "time", "x", "y", "z"), &PhyzSimulation::schedule_impulse);
     ClassDB::bind_method(D_METHOD("cancel_scheduled_impulse"), &PhyzSimulation::cancel_scheduled_impulse);
@@ -79,6 +81,7 @@ void PhyzSimulation::add_gravity(double softening) {
 void PhyzSimulation::load_mission(int missionIndex) {
     missionIndex_ = std::clamp(missionIndex, 0, 4);
     simulation_ = phyz::engine::Simulation(UnitSystem::astronomical());
+    thrustForce_ = nullptr;
     simulation_.set_integrator<phyz::engine::Yoshida4Fixed>();
     deltaVSpent_ = 0.0;
     scheduledImpulse_.reset();
@@ -95,6 +98,21 @@ void PhyzSimulation::load_mission(int missionIndex) {
     if (const auto* player = simulation_.find_body(BodyId{static_cast<std::uint64_t>(playerBodyId_)})) {
         initialPlayerSpeed_ = phyz::engine::length(player->velocity);
     }
+    attach_thrust_force();
+}
+
+void PhyzSimulation::attach_thrust_force() {
+    thrustForce_ = nullptr;
+    for (const auto& model : simulation_.forces().models()) {
+        if (auto* acceleration = dynamic_cast<ConstantAcceleration*>(model.get());
+            acceleration && acceleration->target().value == static_cast<std::uint64_t>(playerBodyId_)) {
+            thrustForce_ = acceleration;
+            thrustForce_->set_acceleration({});
+            return;
+        }
+    }
+    thrustForce_ = &simulation_.forces().add<ConstantAcceleration>(
+        BodyId{static_cast<std::uint64_t>(playerBodyId_)}, Vec3d{});
 }
 
 void PhyzSimulation::build_two_body_transfer() {
@@ -105,6 +123,14 @@ void PhyzSimulation::build_two_body_transfer() {
     primaryBodyId_ = static_cast<std::int64_t>(simulation_.add_body({
         "Helios", BodyKind::Star, 1.0, 1.0, 0.00465, 0.0, 0.08, {}, {},
     }).value);
+    const double planetRadius = 0.72;
+    const double planetPhase = -0.82;
+    simulation_.add_body({
+        "Cinder", BodyKind::Planet, 3.0e-6, 3.0e-6, 4.3e-5, 0.0, 0.052,
+        {planetRadius * std::cos(planetPhase), planetRadius * std::sin(planetPhase), 0.0},
+        {-std::sqrt(simulation_.units().gravitationalConstant / planetRadius) * std::sin(planetPhase),
+          std::sqrt(simulation_.units().gravitationalConstant / planetRadius) * std::cos(planetPhase), 0.0},
+    });
     playerBodyId_ = static_cast<std::int64_t>(simulation_.add_body({
         "Courier", BodyKind::Spacecraft, 0.0, 0.0, 8.0e-8, 0.0, 0.025,
         {1.0, 0.0, 0.0}, {0.0, 2.0 * std::numbers::pi, 0.0},
@@ -234,6 +260,54 @@ Dictionary PhyzSimulation::advance(double years) {
         events.append(event_dictionary(event));
     }
     result["events"] = events;
+    return result;
+}
+
+Dictionary PhyzSimulation::advance_controlled(
+    double years, double x, double y, double z, double throttle) {
+    const double requested = std::clamp(years, 0.0, 0.05);
+    const Vec3d command{x, y, z};
+    const double commandLength = phyz::engine::length(command);
+    const double clampedThrottle = std::clamp(throttle, 0.0, 1.0);
+    const double reserved = scheduledImpulse_
+        ? phyz::engine::length(scheduledImpulse_->deltaVelocity)
+        : 0.0;
+    const double remainingBudget = std::max(0.0, deltaVBudget_ - deltaVSpent_ - reserved);
+    const double accelerationMagnitude = commandLength > 1.0e-12
+        ? maxThrustAcceleration_ * clampedThrottle
+        : 0.0;
+    const double poweredDuration = accelerationMagnitude > 0.0
+        ? std::min(requested, remainingBudget / accelerationMagnitude)
+        : 0.0;
+
+    Dictionary result;
+    bool burnExecuted = false;
+    double consumed = 0.0;
+    if (poweredDuration > 0.0 && thrustForce_) {
+        const Vec3d acceleration = command * (accelerationMagnitude / commandLength);
+        thrustForce_->set_acceleration(acceleration);
+        const double before = simulation_.time();
+        const double plannedConsumption = accelerationMagnitude * poweredDuration;
+        deltaVSpent_ += plannedConsumption;
+        result = advance(poweredDuration);
+        const double elapsed = std::max(0.0, simulation_.time() - before);
+        consumed = accelerationMagnitude * elapsed;
+        deltaVSpent_ -= plannedConsumption - consumed;
+        burnExecuted = static_cast<bool>(result.get("burn_executed", false));
+        thrustForce_->set_acceleration({});
+    }
+    const double coastDuration = requested - poweredDuration;
+    if (coastDuration > 1.0e-15) {
+        Dictionary coast = advance(coastDuration);
+        burnExecuted = burnExecuted || static_cast<bool>(coast.get("burn_executed", false));
+        result = coast;
+    } else if (result.is_empty()) {
+        result = advance(requested);
+    }
+    result["burn_executed"] = burnExecuted;
+    result["thrust_delta_v"] = consumed;
+    result["throttle"] = clampedThrottle;
+    result["fuel_depleted"] = accelerationMagnitude > 0.0 && poweredDuration + 1.0e-15 < requested;
     return result;
 }
 
@@ -386,6 +460,7 @@ Dictionary PhyzSimulation::get_mission_definition() const {
     result["delta_v_spent"] = deltaVSpent_;
     result["delta_v_reserved"] = scheduledImpulse_ ? phyz::engine::length(scheduledImpulse_->deltaVelocity) : 0.0;
     result["deadline"] = missionDeadline_;
+    result["max_thrust_acceleration"] = maxThrustAcceleration_;
     return result;
 }
 
@@ -517,6 +592,7 @@ bool PhyzSimulation::load_snapshot(const String& text) {
     missionDeadline_ = missionDeadline;
     initialPlayerSpeed_ = initialPlayerSpeed;
     scheduledImpulse_ = scheduledImpulse;
+    attach_thrust_force();
     return true;
 }
 

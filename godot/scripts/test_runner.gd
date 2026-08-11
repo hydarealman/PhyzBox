@@ -58,6 +58,26 @@ func _run() -> void:
 
 	simulation.load_mission(0)
 	var definition: Dictionary = simulation.get_mission_definition()
+	var player_id := int(definition.player_body_id)
+	var velocity_before := Vector3.ZERO
+	for body in simulation.get_bodies():
+		if int(body.id) == player_id:
+			velocity_before = Vector3(float(body.velocity[0]), float(body.velocity[1]), float(body.velocity[2]))
+	var controlled_report: Dictionary = simulation.advance_controlled(0.01, 1.0, 0.0, 0.0, 0.5)
+	var velocity_after := Vector3.ZERO
+	for body in simulation.get_bodies():
+		if int(body.id) == player_id:
+			velocity_after = Vector3(float(body.velocity[0]), float(body.velocity[1]), float(body.velocity[2]))
+	check(int(controlled_report.status) == 0, "finite-thrust propagation advances successfully")
+	check(float(controlled_report.thrust_delta_v) > 0.024,
+		"finite thrust reports its integrated delta-v")
+	check(float(simulation.get_mission_definition().delta_v_spent) > 0.024,
+		"finite thrust consumes the shared mission fuel budget")
+	check((velocity_after - velocity_before).length() > 0.02,
+		"finite thrust changes the authoritative libphyz state")
+
+	simulation.load_mission(0)
+	definition = simulation.get_mission_definition()
 	check(simulation.apply_impulse(int(definition.player_body_id), 0.0, 0.1, 0.0),
 		"valid impulse is accepted")
 	check(not simulation.apply_impulse(int(definition.player_body_id), 100.0, 0.0, 0.0),

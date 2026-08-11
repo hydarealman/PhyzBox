@@ -2,8 +2,8 @@
 config_version=5
 
 [application]
-config/name="PhyzBox：余烬航线"
-run/main_scene="res://scenes/main.tscn"
+config/name="PhyzBox：旅行者太阳系"
+run/main_scene="res://scenes/voyager_main.tscn"
 
 [display]
 window/size/viewport_width=1440

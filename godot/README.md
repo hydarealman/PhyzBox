@@ -1,44 +1,73 @@
-# 《余烬航线》Godot 游戏前端
+# PhyzBox Godot 前端：旅行者太阳系
 
-这是 `libphyz` 的可玩 Godot 4.6.3 前端，通过 C++ GDExtension 调用权威物理状态。Godot 只负责显示、输入、剧情和任务反馈；N-body 状态、数值积分、机动节点与轨迹预测始终保留在双精度 C++ 层。
+Godot 4.6.3 主场景是无 HUD 的旅行者 1 号历史航行体验。默认入口为 `scenes/voyager_main.tscn`，运行时加载官方星历与 Hipparcos 星表；旧 `main.tscn` 任务驾驶舱保留用于 `libphyz` 集成和回归测试，但不再作为游戏首页。
 
-## 玩家闭环
+## 运行
 
-选择任务 → 阅读简报 → 设置 `Δv` 与节点时刻 → 预览黄色轨迹 → 提交节点 → 推进时间 → 根据真实状态成功或失败。
-
-五关覆盖霍曼式转移、交会对接、引力弹弓、小行星偏转和混沌系统生存。任务结果不依赖预制路径。导航建议提供经过自动化测试的起步解，目的是让第一次游玩的玩家迅速理解流程，而不是跳过操作。
-
-界面包含：
-
-- Godot shader 实时渲染的章节星空、行星边缘光和轨道线，不依赖生成式贴图
-- 顶部航线栏、左上目标卡、底部机动控制台和默认折叠的专业数据
-- 由太阳翼、散热板、天线、RCS 与电推进器组成的程序化 3D 航天器
-- 青色飞船、洋红目标、金色主天体，以及黄色未来轨迹和实时任务指标
-- 轨道镜头、目标聚焦、暂停、倍率、单步与立即点火
-- 版本化快照、战役进度和最佳分数本地存档
-
-## 开发与运行
-
-在仓库根目录执行：
+在仓库根目录：
 
 ```powershell
-.\scripts\bootstrap_godot.ps1
-.\scripts\build_all.ps1 -GodotTarget template_release -Jobs 4
 .\scripts\run_game.ps1
 ```
 
-发布版输出为 `dist/PhyzBox.exe`。
+或直接启动编辑器 / 项目：
 
-单独运行物理/任务集成测试：
+```powershell
+.\.tools\godot\Godot_v4.6.3-stable_win64_console.exe --path .\godot
+```
+
+## 输入
+
+| 输入 | 作用 |
+|---|---|
+| `Space` | 播放 / 暂停 |
+| `+` / `-` | 改变历史时间倍率 |
+| `A` | 自动接近减速 |
+| `M` | 跟随视图 / 太阳系总览 |
+| `1`–`5` | 跳到主要历史节点 |
+| `←` / `→` | 前后移动 1 天 |
+| `Shift + ←/→` | 前后移动 30 天 |
+| 鼠标拖动 / 滚轮 | 环绕 / 缩放 |
+| `Home` | 回到 1977 起点 |
+| `Esc` | 退出 |
+
+窗口标题显示 UTC 日期、暂停 / 播放状态与当前倍率。场景本身不创建 `CanvasLayer`、按钮、面板或时间轴。
+
+## 运行时结构
+
+```text
+voyager_main.tscn
+└─ voyager_main.gd
+   ├─ historical_ephemeris.gd       PHYZEPH2 双精度星历 / Hermite 插值
+   ├─ Voyager 程序化部件模型
+   ├─ 真实半径与距离驱动的跟随视图
+   ├─ AU 尺度太阳系总览
+   ├─ Hipparcos MultiMesh 星空
+   └─ 程序化行星、大气与银河 shader
+```
+
+核心数据：
+
+- `data/voyager_ephemeris.phyz`：JPL DE440s、Voyager 1/2 SPK 预处理结果
+- `data/voyager_ephemeris.json`：来源、覆盖期和 SHA-256
+- `data/hipparcos_bright.phyzstars`：V≤9 的 83,337 颗恒星
+- `data/hipparcos_bright.json`：查询条件、ESA credit 与 SHA-256
+
+跟随视图不会把 km 级坐标直接塞进 Godot 单精度世界。它先保持双精度相对状态，再按当前目标重建相机局部空间，同时保持天体的真实角直径。太阳系总览使用 AU 坐标，并单独设置可见图标尺寸。
+
+## 测试
+
+旅行者历史模式：
+
+```powershell
+.\.tools\godot\Godot_v4.6.3-stable_win64_console.exe --headless --path .\godot --script res://scripts/voyager_test_runner.gd
+```
+
+旧任务物理与可玩解：
 
 ```powershell
 .\.tools\godot\Godot_v4.6.3-stable_win64_console.exe --headless --path .\godot --script res://scripts/test_runner.gd
-```
-
-运行真实界面的自动可玩性冒烟测试：
-
-```powershell
 .\.tools\godot\Godot_v4.6.3-stable_win64_console.exe --headless --path .\godot --script res://scripts/ui_smoke_runner.gd
 ```
 
-测试会实际实例化驾驶舱、关闭剧情简报、使用导航建议、提交节点、推进第一关、检查成功结算和下一关解锁。生成的本机 DLL、Godot 导入缓存与工具链不会进入 Git。
+全量构建脚本会依次运行 C++ 单元测试、原生实验室自检、GDExtension 构建、两套 Godot 回归和 Windows 导出验证。

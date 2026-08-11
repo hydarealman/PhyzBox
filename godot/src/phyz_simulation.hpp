@@ -18,6 +18,7 @@ public:
 
     void load_mission(int missionIndex);
     Dictionary advance(double years);
+    Dictionary advance_controlled(double years, double x, double y, double z, double throttle);
     bool apply_impulse(std::int64_t bodyId, double x, double y, double z);
     bool schedule_impulse(std::int64_t bodyId, double time, double x, double y, double z);
     bool cancel_scheduled_impulse();
@@ -44,6 +45,7 @@ private:
     void build_asteroid_deflection();
     void build_chaos_survival();
     void add_gravity(double softening = 1.0e-6);
+    void attach_thrust_force();
     static phyz::engine::BodyKind kind_from_int(int value);
 
     phyz::engine::Simulation simulation_;
@@ -55,6 +57,8 @@ private:
     double deltaVSpent_ = 0.0;
     double missionDeadline_ = 2.0;
     double initialPlayerSpeed_ = 0.0;
+    double maxThrustAcceleration_ = 5.0;
+    phyz::engine::ConstantAcceleration* thrustForce_ = nullptr;
     std::optional<phyz::engine::ImpulseManeuver> scheduledImpulse_;
 };
 

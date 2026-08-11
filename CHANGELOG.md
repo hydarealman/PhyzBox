@@ -2,6 +2,16 @@
 
 ## [Unreleased] — 2026-08-04
 
+### Voyager historical solar system — 2026-08-11
+- Replaced the default campaign cockpit with a HUD-free Voyager 1 historical-playback scene
+- Imported JPL DE440s and official Voyager 1/2 SPK states for 1977–2030 with double-precision Hermite interpolation
+- Added time-rate controls, automatic encounter slowdown, five history jumps, free date stepping and follow/system cameras
+- Added a code-built Voyager spacecraft and dual-scale rendering that preserves physical angular diameter near planets
+- Removed every CanvasLayer, button, panel, picker and timeline from the historical runtime view
+- Imported 83,337 Hipparcos stars with ICRS directions, V magnitudes and B−V-derived colors
+- Added a J2000-oriented procedural Milky Way, planet surfaces, clouds and atmosphere shaders without generated textures
+- Added auditable source/hash metadata, deterministic import tools, historical-playback tests and new visual captures
+
 ### Visual overhaul — 2026-08-05
 - Rebuilt the cockpit around a cinematic top route bar, compact objective card and bottom maneuver dock
 - Moved integrator, orbital elements and persistence controls into an optional professional telemetry panel

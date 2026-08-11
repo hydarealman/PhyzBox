@@ -2,29 +2,27 @@
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/language-C++20-%23f34b7d.svg" alt="C++20">
   <img src="https://img.shields.io/badge/Godot-4.6-478cbf.svg" alt="Godot 4.6">
-  <img src="https://img.shields.io/badge/platform-Windows-0078d7.svg" alt="Platform: Windows">
-  <img src="https://img.shields.io/badge/physics-libphyz-brightgreen.svg" alt="libphyz physics">
+  <img src="https://img.shields.io/badge/data-JPL%20SPICE-5f87ff.svg" alt="JPL SPICE">
+  <img src="https://img.shields.io/badge/stars-Hipparcos-ffd27a.svg" alt="Hipparcos">
 </p>
 
-# PhyzBox：余烬航线
+# PhyzBox：旅行者太阳系
 
-一款由真实轨道力学驱动的单人任务游戏。你是太阳系边缘最后一名引力操作员，需要在有限推进剂下规划机动节点、预判黄色轨迹，并把飞船送过五个越来越危险的天体任务。
+这是一个从 1977 年开始、由真实星历驱动的太阳系航行体验。当前主模式沿旅行者 1 号的历史轨迹回放：地球、月球、行星、太阳和探测器的位置与速度来自 JPL NAIF SPICE 内核，不是按关卡脚本摆放的动画。
 
-![余烬航线驾驶舱](docs/images/ember-route-cockpit.png)
+![旅行者 1 号木星飞掠](docs/images/voyager-jupiter-encounter.png)
 
-游戏不是按预设路径播放动画：天体位置、引力弹弓、交会距离和任务结果全部由 C++20 `libphyz` 双精度 N-body 引擎实时计算。Godot 负责驾驶舱、剧情、镜头和反馈，旧版 Win32/OpenGL 程序作为科学实验室保留。
+主画面已经删除全部 HUD 面板、按钮、任务卡和大段文字。日期、播放状态与倍率只显示在操作系统窗口标题；游戏画面只留下天体、旅行者号、真实星空和可选的太阳系轨道总览。
 
-剧情简报背景由 Godot shader 实时绘制星空、行星边缘光与轨道线，不使用生成式贴图。专业遥测默认折叠；主画面只保留任务指标、轨迹与机动控制。飞船由推进舱、太阳翼、散热板、天线、RCS 和四组电推进器构成，不再用球体代替。
+## 立即运行
 
-## 立即游玩
-
-已经构建发布包时，直接运行：
+已有发布包时：
 
 ```powershell
 .\dist\PhyzBox.exe
 ```
 
-首次从源码构建：
+从源码构建并运行：
 
 ```powershell
 .\scripts\bootstrap_godot.ps1
@@ -32,50 +30,74 @@
 .\scripts\run_game.ps1
 ```
 
-Windows 游戏生成在 `dist/PhyzBox.exe`。物理库使用者参阅 [libphyz/README.md](libphyz/README.md)，游戏开发说明参阅 [godot/README.md](godot/README.md)，完整实施与验收记录见 [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md)，视觉设计决策见 [VISUAL_REDESIGN_REPORT.md](VISUAL_REDESIGN_REPORT.md)。
+需要 Godot 4.6.3。Windows 发布文件生成在 `dist/`。
 
-## 怎么玩
+## 怎么体验
 
-每一关都遵循同一个清晰的轨道工程闭环：
+启动时位于 1977-09-05 的第一段官方旅行者 1 号星历附近。此时探测器仍非常靠近地球，因此地球会越过画面边缘；这不是被放大的游戏图标，而是按真实半径与距离得到的角直径。
 
-1. 阅读任务简报，认清青色的“你的飞船”、洋红色的“任务目标”和金色主天体。
-2. 输入三轴 `Δv` 和机动发生时刻；不熟悉轨道力学时可点“导航建议”取得一组经过测试、但仍需亲自执行的参数。
-3. 点“预测轨迹”，观察黄色未来轨迹是否接近目标。
-4. 点“提交节点”，再点“运行”；求解器会精确推进至节点并施加脉冲。
-5. 通过实时任务指标判断是否需要暂停、修正或重新开始。成功后会解锁下一关并保存最佳成绩。
+- `Space`：播放 / 暂停历史
+- `+` / `-`：调整时间流速（每秒 1 分钟至 30 天）
+- `A`：开关接近历史事件时的自动减速
+- `M`：旅行者跟随镜头 / 太阳系总览
+- `1`：1977 地球出发
+- `2`：1979 木星飞掠
+- `3`：1980 土星飞掠
+- `4`：离开行星任务阶段
+- `5`：2012 进入星际空间
+- `←` / `→`：后退 / 前进 1 天；按住 `Shift` 时为 30 天
+- 鼠标拖动：环绕镜头
+- 鼠标滚轮：改变观察距离
+- `Home`：回到历史起点
+- `Esc`：退出
 
-常用操作：
+![地球离场近景](docs/images/voyager-earth-departure.png)
 
-- 鼠标拖动画面空白处：绕系统旋转镜头
-- 鼠标滚轮：缩放
-- `Space`：暂停 / 继续
-- `F`：聚焦飞船
-- `T`：聚焦任务目标
-- `H`：查看整个系统
-- 左侧按钮：预测、提交/取消节点、立即点火、单步推进、改变时间倍率、保存/载入
+## 这次为什么更像物理引擎
 
-## 三章五关
+- 行星和探测器状态来自 [JPL NAIF Voyager SPK](https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/) 与 DE440s 星历，运行时使用双精度三次 Hermite 插值。
+- 轨迹覆盖 1977–2030；行星飞掠附近使用小时级采样，其他时段使用日 / 周级采样。
+- 距离、速度、最近天体和事件减速均从星历状态实时计算。
+- 跟随视图使用双尺度渲染：物理状态保持 km，画面在相机局部重建，因此既能表现“飞船极小、行星极大”，也不会损失远日行星的浮点精度。
+- 太阳系总览才使用 AU 尺度和可读性图标；这些显示尺寸不会回写物理状态。
+- 旧的五关轨道任务与 `libphyz` 有限推力 / N-body 能力仍作为实验与后续自由飞行基础保留，但不再作为默认主界面。
 
-![余烬航线章节简报](docs/images/ember-route-briefing.png)
+## 真实星空与程序化美术
 
-| 章节 | 任务 | 核心玩法 |
-|---|---|---|
-| 第一章·火种离港 | 离港窗口、静默信标 | 转移轨道与精确交会 |
-| 第二章·巨人的回声 | 借光而行、苍穹偏转 | 引力弹弓与小行星偏转 |
-| 第三章·三阳尽头 | 最后的观测者 | 在混沌三体系统中生存 |
+背景没有使用 AI 生成贴图或随机宇宙全景。运行包包含从 NASA HEASARC 查询得到的 83,337 颗 Hipparcos 恒星：
 
-章节剧情、教程、失败复盘、解锁进度与最佳分数都会本地保存。五关均通过自动导航解实测，不存在必须碰运气的“假任务”。
+- 天球方向：ICRS / J2000
+- 亮度：Johnson V 视星等
+- 恒星颜色：B−V 色指数估算色温
+- 银河方向：按 J2000 银河北极和银河中心方向固定
+- 银河尘埃与散射：Godot shader 实时渲染，不使用位图贴图
 
-## 项目架构
+星表来源与哈希记录在 `godot/data/hipparcos_bright.json`；旅行者内核来源与哈希记录在 `godot/data/voyager_ephemeris.json`。数据版权与署名遵循各自来源要求，Hipparcos catalogue credit: ESA。
 
-```text
-libphyz（C++20 双精度权威状态）
-├─ Godot GDExtension → 余烬航线：任务、剧情、驾驶舱与渲染
-├─ Win32/OpenGL      → 科学实验室与自由沙盘
-└─ tests/examples    → 算法回归、守恒量与确定性验证
+![太阳系总览](docs/images/voyager-system-map.png)
+
+## 数据再生成
+
+仓库已经包含运行所需的压缩数据。需要从官方源重新生成时：
+
+```powershell
+$env:PYTHONPATH = (Resolve-Path .tools\python).Path
+python .\tools\import_voyager_ephemeris.py
+python .\tools\import_hipparcos_stars.py
 ```
 
-> 🌌 从混沌三体实验室发展为可玩的轨道工程游戏，完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+导入器会把下载缓存放在忽略提交的 `.runtime/`，并生成可审计的来源、筛选条件与 SHA-256 元数据。
+
+## 验证
+
+```powershell
+.\.tools\godot\Godot_v4.6.3-stable_win64_console.exe --headless --path .\godot --script res://scripts/voyager_test_runner.gd
+.\scripts\build_all.ps1 -GodotTarget template_release -Jobs 4
+```
+
+测试覆盖星历载入、历史距离、时间倍率、事件跳转、太阳系视图、真实星表数量，以及默认主场景不存在 `CanvasLayer` 屏幕界面。
+
+项目结构与物理库说明见 [godot/README.md](godot/README.md)、[libphyz/README.md](libphyz/README.md) 和 [IMPLEMENTATION_REPORT.md](IMPLEMENTATION_REPORT.md)。
 
 ## 科学实验室
 
