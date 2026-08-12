@@ -13,8 +13,8 @@ const VOYAGER_1 := -31
 const SUN := 10
 const EARTH := 399
 
-const TIME_RATES := [60.0, 3600.0, 21_600.0, 86_400.0, 604_800.0, 2_592_000.0]
-const TIME_RATE_LABELS := ["1分钟/秒", "1小时/秒", "6小时/秒", "1天/秒", "1周/秒", "30天/秒"]
+const TIME_RATES := [60.0, 600.0, 3_600.0, 21_600.0, 86_400.0, 259_200.0, 604_800.0, 1_209_600.0, 2_592_000.0]
+const TIME_RATE_LABELS := ["1分钟/秒", "10分钟/秒", "1小时/秒", "6小时/秒", "1天/秒", "3天/秒", "1周/秒", "14天/秒", "30天/秒"]
 const BODY_ORDER := [10, 199, 299, 399, 301, 499, 5, 6, 7, 8, 9]
 const FOCUS_ORDER := [399, 5, 6, 7, 8, 6, 499, 299, 199, 301, 9, 10]
 const BODY_DATA := {
@@ -53,7 +53,7 @@ const EVENT_SPECS := [
 var ephemeris
 var current_epoch := 0.0
 var playing := false
-var rate_index := 4
+var rate_index := 6
 var auto_slow := true
 var view_mode := "follow"
 var focus_body_id := EARTH
@@ -71,6 +71,10 @@ var map_grid: MeshInstance3D
 var world_environment: Environment
 var galactic_material: ShaderMaterial
 var star_material: ShaderMaterial
+var time_control_layer: CanvasLayer
+var time_rate_slider: HSlider
+var time_rate_label: Label
+var time_play_button: Button
 var audience_grade := true
 var camera_distance := 0.35
 var camera_yaw := 0.0
@@ -129,10 +133,139 @@ func _build_world() -> void:
 	map_grid = _create_map_grid()
 	add_child(map_grid)
 	_build_starfield()
+	_build_time_controls()
 
 	trajectory_mesh = MeshInstance3D.new()
 	trajectory_mesh.name = "VoyagerReferenceTrajectory"
 	add_child(trajectory_mesh)
+
+func _build_time_controls() -> void:
+	time_control_layer = CanvasLayer.new()
+	time_control_layer.name = "TimeControlLayer"
+	time_control_layer.layer = 20
+	add_child(time_control_layer)
+
+	var panel := PanelContainer.new()
+	panel.name = "TimeControlPanel"
+	panel.set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	panel.offset_left = -310.0
+	panel.offset_top = -112.0
+	panel.offset_right = 310.0
+	panel.offset_bottom = -22.0
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.add_theme_stylebox_override("panel", _time_panel_style())
+	time_control_layer.add_child(panel)
+
+	var margin := MarginContainer.new()
+	margin.name = "TimeControlMargin"
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_top", 11)
+	margin.add_theme_constant_override("margin_right", 18)
+	margin.add_theme_constant_override("margin_bottom", 11)
+	panel.add_child(margin)
+
+	var row := HBoxContainer.new()
+	row.name = "TimeControlRow"
+	row.add_theme_constant_override("separation", 15)
+	margin.add_child(row)
+
+	time_play_button = Button.new()
+	time_play_button.name = "PlayPause"
+	time_play_button.custom_minimum_size = Vector2(50.0, 50.0)
+	time_play_button.focus_mode = Control.FOCUS_NONE
+	time_play_button.tooltip_text = "播放 / 暂停历史（Space）"
+	time_play_button.add_theme_font_size_override("font_size", 21)
+	time_play_button.add_theme_color_override("font_color", Color("d8f7ff"))
+	time_play_button.add_theme_color_override("font_hover_color", Color("ffffff"))
+	time_play_button.add_theme_stylebox_override("normal", _time_button_style(Color("16293a"), Color("31566f")))
+	time_play_button.add_theme_stylebox_override("hover", _time_button_style(Color("1b3c50"), Color("64cce2")))
+	time_play_button.add_theme_stylebox_override("pressed", _time_button_style(Color("102331"), Color("f2bd67")))
+	time_play_button.pressed.connect(_toggle_playing)
+	row.add_child(time_play_button)
+
+	var controls := VBoxContainer.new()
+	controls.name = "RateControls"
+	controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	controls.add_theme_constant_override("separation", 3)
+	row.add_child(controls)
+
+	var header := HBoxContainer.new()
+	header.name = "RateHeader"
+	controls.add_child(header)
+	var title := Label.new()
+	title.text = "历史时间"
+	title.add_theme_font_size_override("font_size", 13)
+	title.add_theme_color_override("font_color", Color("76cadd"))
+	header.add_child(title)
+	var header_spacer := Control.new()
+	header_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(header_spacer)
+	time_rate_label = Label.new()
+	time_rate_label.name = "CurrentRate"
+	time_rate_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	time_rate_label.add_theme_font_size_override("font_size", 15)
+	time_rate_label.add_theme_color_override("font_color", Color("f3f6f7"))
+	header.add_child(time_rate_label)
+
+	time_rate_slider = HSlider.new()
+	time_rate_slider.name = "RateSlider"
+	time_rate_slider.custom_minimum_size = Vector2(0.0, 24.0)
+	time_rate_slider.min_value = 0.0
+	time_rate_slider.max_value = float(TIME_RATES.size() - 1)
+	time_rate_slider.step = 1.0
+	time_rate_slider.value = float(rate_index)
+	time_rate_slider.tick_count = TIME_RATES.size()
+	time_rate_slider.ticks_on_borders = true
+	time_rate_slider.focus_mode = Control.FOCUS_NONE
+	time_rate_slider.tooltip_text = "拖动选择历史时间流速"
+	time_rate_slider.add_theme_stylebox_override("slider", _time_slider_style(Color("243746"), 4))
+	time_rate_slider.add_theme_stylebox_override("grabber_area", _time_slider_style(Color("58b9cf"), 4))
+	time_rate_slider.add_theme_stylebox_override("grabber_area_highlight", _time_slider_style(Color("77d8e8"), 4))
+	time_rate_slider.value_changed.connect(_time_rate_slider_changed)
+	controls.add_child(time_rate_slider)
+
+	var limits := HBoxContainer.new()
+	controls.add_child(limits)
+	var slow_label := Label.new()
+	slow_label.text = TIME_RATE_LABELS.front()
+	slow_label.add_theme_font_size_override("font_size", 10)
+	slow_label.add_theme_color_override("font_color", Color("718b9b"))
+	limits.add_child(slow_label)
+	var limits_spacer := Control.new()
+	limits_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	limits.add_child(limits_spacer)
+	var fast_label := Label.new()
+	fast_label.text = TIME_RATE_LABELS.back()
+	fast_label.add_theme_font_size_override("font_size", 10)
+	fast_label.add_theme_color_override("font_color", Color("a98c62"))
+	limits.add_child(fast_label)
+	_update_time_controls()
+
+func _time_panel_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.025, 0.055, 0.080, 0.92)
+	style.border_color = Color(0.22, 0.49, 0.60, 0.62)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(9)
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.48)
+	style.shadow_size = 10
+	return style
+
+func _time_button_style(background: Color, border: Color) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = background
+	style.border_color = border
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(7)
+	return style
+
+func _time_slider_style(color: Color, thickness: int) -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.set_corner_radius_all(thickness / 2)
+	style.content_margin_top = float(thickness)
+	style.content_margin_bottom = float(thickness)
+	return style
 
 func _build_starfield() -> void:
 	var file := FileAccess.open(STAR_CATALOG_PATH, FileAccess.READ)
@@ -447,9 +580,7 @@ func _process(delta: float) -> void:
 	if not ephemeris.loaded:
 		return
 	if playing:
-		var effective_rate: float = TIME_RATES[rate_index]
-		if auto_slow:
-			effective_rate = minf(effective_rate, _automatic_rate_limit())
+		var effective_rate := _effective_time_rate()
 		current_epoch = minf(ephemeris.end_epoch(), current_epoch + delta * effective_rate)
 		if current_epoch >= ephemeris.end_epoch():
 			playing = false
@@ -461,6 +592,7 @@ func _update_history_state() -> void:
 	_update_body_transforms()
 	_update_camera()
 	_position_follow_craft()
+	_update_time_controls()
 	_update_window_title()
 
 func _update_body_transforms() -> void:
@@ -578,24 +710,49 @@ func _automatic_rate_limit() -> float:
 			limit = minf(limit, 3600.0)
 	return limit
 
+func _effective_time_rate() -> float:
+	var selected_rate: float = TIME_RATES[rate_index]
+	return minf(selected_rate, _automatic_rate_limit()) if auto_slow else selected_rate
+
 func _toggle_playing() -> void:
 	playing = not playing
+	_update_time_controls()
 	last_window_title_second = -1
 	_update_window_title()
 
 func _slower() -> void:
-	rate_index = maxi(0, rate_index - 1)
+	_set_time_rate_index(rate_index - 1)
+
+func _faster() -> void:
+	_set_time_rate_index(rate_index + 1)
+
+func _time_rate_slider_changed(value: float) -> void:
+	_set_time_rate_index(roundi(value))
+
+func _set_time_rate_index(index: int) -> void:
+	rate_index = clampi(index, 0, TIME_RATES.size() - 1)
+	_update_time_controls()
 	last_window_title_second = -1
 	_update_window_title()
 
-func _faster() -> void:
-	rate_index = mini(TIME_RATES.size() - 1, rate_index + 1)
-	last_window_title_second = -1
-	_update_window_title()
+func _update_time_controls() -> void:
+	if not time_rate_slider or not time_rate_label or not time_play_button:
+		return
+	time_rate_slider.set_value_no_signal(float(rate_index))
+	var selected_label: String = TIME_RATE_LABELS[rate_index]
+	var effective_rate := _effective_time_rate()
+	var effective_index := TIME_RATES.find(effective_rate)
+	if playing and effective_index >= 0 and effective_index < rate_index:
+		time_rate_label.text = "%s  ·  自动减速 %s" % [selected_label, TIME_RATE_LABELS[effective_index]]
+	else:
+		time_rate_label.text = selected_label
+	time_play_button.text = "Ⅱ" if playing else "▶"
+	time_play_button.tooltip_text = "暂停历史（Space）" if playing else "播放历史（Space）"
 
 func _seek_seconds(seconds: float) -> void:
 	current_epoch = clampf(current_epoch + seconds, ephemeris.start_epoch(), ephemeris.end_epoch())
 	playing = false
+	_update_time_controls()
 	_update_history_state()
 
 func _toggle_auto_slow() -> void:
@@ -623,6 +780,7 @@ func _event_selected(index: int) -> void:
 	focus_body_id = int(event.target)
 	automatic_focus = false
 	playing = false
+	_update_time_controls()
 	_update_history_state()
 
 func _unhandled_input(event: InputEvent) -> void:

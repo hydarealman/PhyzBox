@@ -2,6 +2,10 @@
 
 ## [Unreleased] — 2026-08-04
 
+### Time-control usability — 2026-08-12
+- Added a compact bottom time-rate slider with nine labeled speeds and synchronized keyboard/play controls
+- Displayed the effective automatic-slowdown rate beside the selected rate during close encounters
+
 ### Voyager historical solar system — 2026-08-11
 - Replaced the default campaign cockpit with a HUD-free Voyager 1 historical-playback scene
 - Imported JPL DE440s and official Voyager 1/2 SPK states for 1977–2030 with double-precision Hermite interpolation

@@ -54,7 +54,14 @@ func _run() -> void:
 	root.add_child(game)
 	for frame in range(3):
 		await process_frame
-	check(not _contains_type(game, "CanvasLayer"), "historical view contains no screen UI layer")
+	var time_layer := game.get_node_or_null("TimeControlLayer") as CanvasLayer
+	var time_slider := game.get_node_or_null("TimeControlLayer/TimeControlPanel/TimeControlMargin/TimeControlRow/RateControls/RateSlider") as HSlider
+	var time_rate_label := game.get_node_or_null("TimeControlLayer/TimeControlPanel/TimeControlMargin/TimeControlRow/RateControls/RateHeader/CurrentRate") as Label
+	check(time_layer != null, "historical view provides a compact time-control layer")
+	check(time_slider != null and int(time_slider.max_value) == game.TIME_RATES.size() - 1,
+		"time slider exposes the complete rate range")
+	check(time_rate_label != null and time_rate_label.text == game.TIME_RATE_LABELS[game.rate_index],
+		"time control displays the current rate")
 	check(game.get_node_or_null("HipparcosJ2000Sky") != null, "real catalogue star field is instantiated")
 	var stars := game.get_node_or_null("HipparcosJ2000Sky") as MultiMeshInstance3D
 	check(stars != null and stars.multimesh.instance_count == 83_337, "GPU sky contains the full bright-star selection")
@@ -84,9 +91,23 @@ func _run() -> void:
 	check(not bool(game.audience_grade) and float(game.world_environment.tonemap_exposure) < bright_exposure,
 		"C switches to lower physical exposure")
 	game.call("_toggle_color_grade")
+	time_slider.value = 2.0
+	await process_frame
+	check(int(game.rate_index) == 2 and absf(float(game.TIME_RATES[game.rate_index]) - 3600.0) < 0.01,
+		"dragging the time slider selects one hour per second")
+	check(time_rate_label != null and time_rate_label.text == "1小时/秒", "slider selection updates the visible rate label")
+	game.call("_faster")
+	check(int(game.rate_index) == 3 and int(time_slider.value) == 3,
+		"keyboard rate controls remain synchronized with the slider")
+	game.call("_set_time_rate_index", game.TIME_RATES.size() - 1)
+	game.auto_slow = true
+	game.playing = true
+	game.call("_update_time_controls")
+	check(time_rate_label.text.contains("自动减速") and time_rate_label.text.contains("1分钟/秒"),
+		"close encounters display the effective automatic-slowdown rate")
 
 	var initial_epoch: float = float(game.current_epoch)
-	game.rate_index = 0
+	game.call("_set_time_rate_index", 0)
 	game.auto_slow = false
 	game.playing = true
 	game.call("_process", 2.0)
