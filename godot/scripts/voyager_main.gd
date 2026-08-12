@@ -721,16 +721,18 @@ func _toggle_playing() -> void:
 	_update_window_title()
 
 func _slower() -> void:
-	_set_time_rate_index(rate_index - 1)
+	_set_time_rate_index(rate_index - 1, true)
 
 func _faster() -> void:
-	_set_time_rate_index(rate_index + 1)
+	_set_time_rate_index(rate_index + 1, true)
 
 func _time_rate_slider_changed(value: float) -> void:
-	_set_time_rate_index(roundi(value))
+	_set_time_rate_index(roundi(value), true)
 
-func _set_time_rate_index(index: int) -> void:
+func _set_time_rate_index(index: int, manual_override := false) -> void:
 	rate_index = clampi(index, 0, TIME_RATES.size() - 1)
+	if manual_override:
+		auto_slow = false
 	_update_time_controls()
 	last_window_title_second = -1
 	_update_window_title()
@@ -745,7 +747,7 @@ func _update_time_controls() -> void:
 	if playing and effective_index >= 0 and effective_index < rate_index:
 		time_rate_label.text = "%s  ·  自动减速 %s" % [selected_label, TIME_RATE_LABELS[effective_index]]
 	else:
-		time_rate_label.text = selected_label
+		time_rate_label.text = "%s  ·  %s" % [selected_label, "自动" if auto_slow else "手动"]
 	time_play_button.text = "Ⅱ" if playing else "▶"
 	time_play_button.tooltip_text = "暂停历史（Space）" if playing else "播放历史（Space）"
 
@@ -757,6 +759,7 @@ func _seek_seconds(seconds: float) -> void:
 
 func _toggle_auto_slow() -> void:
 	auto_slow = not auto_slow
+	_update_time_controls()
 	last_window_title_second = -1
 	_update_window_title()
 

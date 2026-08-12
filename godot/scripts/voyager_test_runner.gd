@@ -60,7 +60,7 @@ func _run() -> void:
 	check(time_layer != null, "historical view provides a compact time-control layer")
 	check(time_slider != null and int(time_slider.max_value) == game.TIME_RATES.size() - 1,
 		"time slider exposes the complete rate range")
-	check(time_rate_label != null and time_rate_label.text == game.TIME_RATE_LABELS[game.rate_index],
+	check(time_rate_label != null and time_rate_label.text.begins_with(game.TIME_RATE_LABELS[game.rate_index]),
 		"time control displays the current rate")
 	check(game.get_node_or_null("HipparcosJ2000Sky") != null, "real catalogue star field is instantiated")
 	var stars := game.get_node_or_null("HipparcosJ2000Sky") as MultiMeshInstance3D
@@ -95,9 +95,17 @@ func _run() -> void:
 	await process_frame
 	check(int(game.rate_index) == 2 and absf(float(game.TIME_RATES[game.rate_index]) - 3600.0) < 0.01,
 		"dragging the time slider selects one hour per second")
-	check(time_rate_label != null and time_rate_label.text == "1小时/秒", "slider selection updates the visible rate label")
+	check(not bool(game.auto_slow), "dragging the time slider enters manual-rate mode")
+	check(time_rate_label != null and time_rate_label.text == "1小时/秒  ·  手动",
+		"slider selection displays the effective manual rate")
+	var manual_epoch: float = float(game.current_epoch)
+	game.playing = true
+	game.call("_process", 2.0)
+	check(absf(float(game.current_epoch) - manual_epoch - 7200.0) < 0.01,
+		"manual slider rate is not clamped by launch-event auto slowdown")
+	game.playing = false
 	game.call("_faster")
-	check(int(game.rate_index) == 3 and int(time_slider.value) == 3,
+	check(int(game.rate_index) == 3 and int(time_slider.value) == 3 and not bool(game.auto_slow),
 		"keyboard rate controls remain synchronized with the slider")
 	game.call("_set_time_rate_index", game.TIME_RATES.size() - 1)
 	game.auto_slow = true

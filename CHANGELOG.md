@@ -5,6 +5,7 @@
 ### Time-control usability — 2026-08-12
 - Added a compact bottom time-rate slider with nine labeled speeds and synchronized keyboard/play controls
 - Displayed the effective automatic-slowdown rate beside the selected rate during close encounters
+- Fixed manual slider changes being silently clamped to one minute per second by launch-event auto slowdown
 
 ### Voyager historical solar system — 2026-08-11
 - Replaced the default campaign cockpit with a HUD-free Voyager 1 historical-playback scene
